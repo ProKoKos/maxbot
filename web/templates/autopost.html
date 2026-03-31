@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Автопостинг{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Автопостинг</h1>
+    <p class="text-sm text-gray-500 mt-1">Запланируй пост — бот опубликует его в нужное время</p>
+  </div>
+  <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
+    + Новый пост
+  </button>
+</div>
+
+<!-- Scheduled posts table -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-100">
+  {% if posts %}
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+        <th class="px-5 py-3">Публикация</th>
+        <th class="px-5 py-3">Канал</th>
+        <th class="px-5 py-3">Текст</th>
+        <th class="px-5 py-3">Статус</th>
+        <th class="px-5 py-3 text-right">Действия</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for post in posts %}
+      {% set pair = pairs | selectattr("id", "equalto", post.pair_id) | first | default(None) %}
+      <tr id="post-{{ post.id }}">
+        <td class="px-5 py-3 whitespace-nowrap text-gray-700 font-mono text-xs">
+          {{ post.scheduled_at.strftime("%d.%m.%Y %H:%M") }}
+        </td>
+        <td class="px-5 py-3 text-gray-600 text-xs">
+          {{ pair.channel_name if pair else post.pair_id }}
+        </td>
+        <td class="px-5 py-3 text-gray-700 max-w-xs truncate">{{ post.text }}</td>
+        <td class="px-5 py-3">
+          {% set st = post.status.value if post.status.value is defined else post.status %}
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                       {% if st == 'sent' %}bg-green-100 text-green-700
+                       {% elif st == 'failed' %}bg-red-100 text-red-700
+                       {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+            {% if st == 'sent' %}✓ Опубликован
+            {% elif st == 'failed' %}✗ Ошибка
+            {% else %}⏳ Ожидает{% endif %}
+          </span>
+          {% if post.error_message %}
+          <p class="text-xs text-red-400 mt-0.5 max-w-xs truncate" title="{{ post.error_message }}">
+            {{ post.error_message[:60] }}…
+          </p>
+          {% endif %}
+        </td>
+        <td class="px-5 py-3 text-right">
+          {% if st == 'pending' %}
+          <button onclick="deletePost({{ post.id }})"
+                  class="text-xs px-2 py-1 rounded border border-red-100 text-red-500 hover:bg-red-50 transition-colors">
+            Отменить
+          </button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="py-16 text-center text-gray-400">
+    <p class="text-4xl mb-3">⏰</p>
+    <p class="text-sm">Запланированных постов нет.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Create post modal -->
+<div id="create-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Новый отложенный пост</h2>
+
+    <div id="modal-error" class="hidden mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600"></div>
+
+    <form id="create-form" class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Пара (канал → группа)</label>
+        <select name="pair_id" required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <option value="">— Выбрать —</option>
+          {% for p in pairs %}
+          <option value="{{ p.id }}">{{ p.channel_name or p.channel_id }} → {{ p.group_name or p.group_id }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Текст поста</label>
+        <textarea name="text" required rows="5" placeholder="Поддерживается Markdown..."
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"></textarea>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Дата и время публикации (UTC)</label>
+        <input type="datetime-local" name="scheduled_at" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+      </div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button type="button"
+                onclick="document.getElementById('create-modal').classList.add('hidden')"
+                class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Отмена</button>
+        <button type="submit"
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">
+          Запланировать
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById("create-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      pair_id: parseInt(fd.get("pair_id")),
+      text: fd.get("text"),
+      scheduled_at: new Date(fd.get("scheduled_at")).toISOString(),
+    };
+
+    const res = await fetch("/api/posts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const err = await res.json();
+      const el = document.getElementById("modal-error");
+      el.textContent = err.detail || "Ошибка при сохранении";
+      el.classList.remove("hidden");
+    }
+  });
+
+  async function deletePost(id) {
+    if (!confirm("Отменить этот пост?")) return;
+    const res = await fetch(`/api/posts/${id}`, {method: "DELETE"});
+    if (res.ok) document.getElementById(`post-${id}`).remove();
+  }
+</script>
+{% endblock %}

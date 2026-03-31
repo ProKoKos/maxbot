@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maxbot}
+      POSTGRES_USER: ${POSTGRES_USER:-maxbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maxbot_pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maxbot} -d ${POSTGRES_DB:-maxbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - maxbot
+
+  # ── Migrations (run once, then exit) ─────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    command: >
+      sh -c "
+        echo 'Waiting for DB...' &&
+        until python -c 'import psycopg2, os; psycopg2.connect(os.environ[\"SYNC_DATABASE_URL\"])' 2>/dev/null; do
+          sleep 1;
+        done &&
+        echo 'Running migrations...' &&
+        alembic upgrade head &&
+        echo 'Migrations complete.'
+      "
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - maxbot
+    restart: "no"
+
+  # ── Web UI + API ──────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://maxbot:maxbot_pass@db:5432/maxbot}
+      - SYNC_DATABASE_URL=${SYNC_DATABASE_URL:-postgresql://maxbot:maxbot_pass@db:5432/maxbot}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - maxbot
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Bot (long-polling) ────────────────────────────────────────────────────────
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://maxbot:maxbot_pass@db:5432/maxbot}
+      - SYNC_DATABASE_URL=${SYNC_DATABASE_URL:-postgresql://maxbot:maxbot_pass@db:5432/maxbot}
+      - BOT_MODE=${BOT_MODE:-polling}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - maxbot
+
+  # ── Scheduler (APScheduler) ───────────────────────────────────────────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: scheduler/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://maxbot:maxbot_pass@db:5432/maxbot}
+      - SYNC_DATABASE_URL=${SYNC_DATABASE_URL:-postgresql://maxbot:maxbot_pass@db:5432/maxbot}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - maxbot
+
+volumes:
+  pgdata:
+
+networks:
+  maxbot:
+    driver: bridge

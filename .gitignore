@@ -1,0 +1,12 @@
+.env
+.claude/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.sqlite3
+.DS_Store
+pgdata/

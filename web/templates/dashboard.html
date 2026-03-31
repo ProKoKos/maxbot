@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
+  <p class="text-sm text-gray-500 mt-1">Обзор состояния бота и активных пар</p>
+</div>
+
+<!-- Status cards -->
+<div id="status-cards" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8"
+     hx-get="/api/status" hx-trigger="load, every 30s" hx-swap="innerHTML"
+     hx-target="#status-inner">
+  <div id="status-inner" class="contents">
+    <!-- Filled by HTMX -->
+    <div class="col-span-3 flex items-center gap-2 text-sm text-gray-400 py-4">
+      <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+      </svg>
+      Загрузка...
+    </div>
+  </div>
+</div>
+
+<!-- Pairs summary -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
+  <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+    <h2 class="font-semibold text-gray-800">Активные пары</h2>
+    <a href="/pairs" class="text-sm text-indigo-600 hover:text-indigo-800">Управлять →</a>
+  </div>
+  {% if pairs %}
+  <ul class="divide-y divide-gray-50">
+    {% for p in pairs %}
+    <li class="px-5 py-3 flex items-center justify-between text-sm">
+      <div class="flex items-center gap-2">
+        <span class="{% if p.enabled %}text-green-500{% else %}text-gray-300{% endif %}">●</span>
+        <span class="font-medium text-gray-800">{{ p.channel_name or p.channel_id }}</span>
+        <span class="text-gray-400">→</span>
+        <span class="text-gray-600">{{ p.group_name or p.group_id }}</span>
+      </div>
+      <span class="text-xs px-2 py-0.5 rounded-full
+                   {% if p.enabled %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+        {{ "активна" if p.enabled else "отключена" }}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="px-5 py-8 text-center text-sm text-gray-400">
+    Нет настроенных пар.
+    <a href="/pairs" class="text-indigo-600 hover:underline ml-1">Добавить первую →</a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Recent logs -->
+<div class="bg-white rounded-xl shadow-sm border border-gray-100">
+  <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+    <h2 class="font-semibold text-gray-800">Последние события</h2>
+    <a href="/logs" class="text-sm text-indigo-600 hover:text-indigo-800">Все события →</a>
+  </div>
+  {% if recent_logs %}
+  <ul class="divide-y divide-gray-50">
+    {% for log in recent_logs %}
+    <li class="px-5 py-2.5 flex items-start gap-3 text-sm">
+      <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0
+                   {% if log.level.value == 'error' %}bg-red-500
+                   {% elif log.level.value == 'warning' %}bg-yellow-500
+                   {% else %}bg-blue-400{% endif %}"></span>
+      <div class="flex-1 min-w-0">
+        <p class="text-gray-700 truncate">{{ log.message }}</p>
+        <p class="text-xs text-gray-400 mt-0.5">{{ log.created_at.strftime("%d.%m.%Y %H:%M:%S") }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="px-5 py-8 text-center text-sm text-gray-400">Событий пока нет.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // HTMX response handler: render status cards from JSON
+  document.body.addEventListener("htmx:afterRequest", function(evt) {
+    if (evt.detail.pathInfo && evt.detail.pathInfo.requestPath === "/api/status") {
+      const data = JSON.parse(evt.detail.xhr.responseText);
+      const el = document.getElementById("status-inner");
+      el.innerHTML = `
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4">
+          <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Активных ботов</p>
+          <p class="text-3xl font-bold ${data.bots_active > 0 ? "text-green-600" : "text-gray-400"}">
+            ${data.bots_active}
+            <span class="text-base font-normal text-gray-400">/ ${data.bots_total}</span>
+          </p>
+          <a href="/bots" class="text-xs text-indigo-500 hover:underline mt-1 inline-block">Управлять →</a>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4">
+          <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Пар всего</p>
+          <p class="text-3xl font-bold text-indigo-600">${data.pairs_total}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4">
+          <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Активных пар</p>
+          <p class="text-3xl font-bold text-green-600">${data.pairs_active}</p>
+        </div>
+      `;
+    }
+  });
+</script>
+{% endblock %}

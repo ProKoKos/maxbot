@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Лог событий{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Лог событий</h1>
+    <p class="text-sm text-gray-500 mt-1">Последние 50 записей</p>
+  </div>
+  <button onclick="window.location.reload()"
+          class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
+    ↻ Обновить
+  </button>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100">
+  {% if logs %}
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+        <th class="px-5 py-3 w-32">Время</th>
+        <th class="px-5 py-3 w-24">Уровень</th>
+        <th class="px-5 py-3">Сообщение</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50 font-mono text-xs">
+      {% for log in logs %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-5 py-2.5 text-gray-400 whitespace-nowrap">
+          {{ log.created_at.strftime("%d.%m %H:%M:%S") }}
+        </td>
+        <td class="px-5 py-2.5">
+          {% set lv = log.level.value if log.level.value is defined else log.level %}
+          <span class="px-1.5 py-0.5 rounded text-xs font-medium
+                       {% if lv == 'error' %}bg-red-100 text-red-700
+                       {% elif lv == 'warning' %}bg-yellow-100 text-yellow-700
+                       {% else %}bg-blue-100 text-blue-700{% endif %}">
+            {{ lv }}
+          </span>
+        </td>
+        <td class="px-5 py-2.5 text-gray-700 break-all">{{ log.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="py-16 text-center text-gray-400">
+    <p class="text-4xl mb-3">📋</p>
+    <p class="text-sm">Событий пока нет.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

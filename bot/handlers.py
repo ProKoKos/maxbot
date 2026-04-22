@@ -107,7 +107,10 @@ async def _handle_message_created(
 
     # ── Step 2: Add inline button to original channel post ───────────────────
     button = comment_button(pair.group_link, group_message_id)
-    edited = await _try_edit_with_button(client, chat_id, message_id, text, button)
+    # Pass original attachments so link previews (share) are preserved after edit
+    edited = await _try_edit_with_button(
+        client, chat_id, message_id, text, button, original_attachments
+    )
 
     if not edited:
         # Fallback: post a reply with the button in the channel
@@ -143,15 +146,17 @@ async def _try_edit_with_button(
     message_id: str,
     text: str,
     button: dict,
+    original_attachments: list[dict] | None = None,
 ) -> bool:
     """
     Attempts to edit the original post to attach an inline button.
+    Preserves original attachments (link previews, media) by placing them
+    before the button in the attachments array.
     Returns True on success, False on permission error.
-
-    ⚠️  LIMITATION: Only works if the post was authored by the bot itself.
     """
+    attachments = list(original_attachments or []) + [button]
     try:
-        await client.edit_message(message_id=message_id, text=text or "", attachments=[button])
+        await client.edit_message(message_id=message_id, text=text or "", attachments=attachments)
         return True
     except MaxAPIError as exc:
         if exc.status in (403, 400):
@@ -161,12 +166,17 @@ async def _try_edit_with_button(
 
 
 def _extract_media_attachments(body: dict) -> list[dict]:
+    """
+    Extract re-sendable attachments from a message body.
+    Captures: image, video, audio, file (by token) and share/link previews (by token).
+    """
     attachments = []
     for att in body.get("attachments", []):
         att_type = att.get("type", "")
         payload = att.get("payload", {})
-        if att_type in ("image", "video", "audio", "file") and payload.get("token"):
-            attachments.append({"type": att_type, "payload": {"token": payload["token"]}})
+        token = payload.get("token")
+        if att_type in ("image", "video", "audio", "file", "share") and token:
+            attachments.append({"type": att_type, "payload": {"token": token}})
     return attachments
 
 

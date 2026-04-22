@@ -125,7 +125,7 @@ class MaxClient:
         payload: dict[str, Any] = {"text": text, "format": format}
         if attachments:
             payload["attachments"] = attachments
-        return await self._request("PUT", f"/messages/{message_id}", json=payload)
+        return await self._request("PUT", "/messages", params={"message_id": message_id}, json=payload)
 
     async def reply_to_message(
         self,
@@ -136,7 +136,7 @@ class MaxClient:
     ) -> dict:
         """Reply to a specific message (used as fallback when edit is not allowed)."""
         payload: dict[str, Any] = {
-            "text": text,
+            "text": text or "💬",
             "link": {"type": "reply", "mid": message_id},
         }
         if attachments:

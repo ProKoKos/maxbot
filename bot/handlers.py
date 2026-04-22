@@ -114,7 +114,7 @@ async def _handle_message_created(
     try:
         await client.send_message(
             chat_id=chat_id,
-            text="\u200b",   # zero-width space — satisfies required text field
+            text=" ",
             attachments=[button],
             notify=False,
         )

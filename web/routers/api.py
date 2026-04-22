@@ -220,6 +220,45 @@ async def bot_status(current_user: CurrentUser, session: DBSession, _: RateLimit
     }
 
 
+# ── Bot chats (for pair builder) ──────────────────────────────────────────────
+
+@router.get("/bots/{bot_id}/chats")
+async def get_bot_chats(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
+    """Fetch channels and groups the bot is a member of via MAX API."""
+    result = await session.execute(
+        select(Bot).where(Bot.id == bot_id, Bot.user_id == current_user.id)
+    )
+    bot = result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(404, "Bot not found")
+
+    try:
+        token = decrypt_token(bot.encrypted_token)
+    except ValueError:
+        raise HTTPException(500, "Token decryption failed")
+
+    async with MaxClient(token=token) as client:
+        try:
+            data = await client.get_chats()
+        except MaxAPIError as exc:
+            raise HTTPException(502, f"MAX API error: {exc}")
+
+    channels = []
+    groups = []
+    for chat in data.get("chats", []):
+        item = {
+            "chat_id": str(chat["chat_id"]),
+            "title": chat.get("title", ""),
+            "link": chat.get("link"),  # may be None for private groups
+        }
+        if chat.get("type") == "channel":
+            channels.append(item)
+        elif chat.get("type") == "chat":
+            groups.append(item)
+
+    return {"channels": channels, "groups": groups}
+
+
 # ── Pairs ─────────────────────────────────────────────────────────────────────
 
 class PairCreate(BaseModel):
@@ -278,6 +317,52 @@ async def create_pair(body: PairCreate, current_user: CurrentUser, session: DBSe
     await session.commit()
     await session.refresh(pair)
     return {"id": pair.id}
+
+
+class PairUpdate(BaseModel):
+    bot_id: int | None = None
+    channel_id: str | None = None
+    channel_name: str | None = None
+    group_id: str | None = None
+    group_name: str | None = None
+    group_link: str | None = None
+
+
+@router.patch("/pairs/{pair_id}")
+async def update_pair(
+    pair_id: int, body: PairUpdate, current_user: CurrentUser, session: DBSession, _: RateLimit
+):
+    result = await session.execute(
+        select(ChannelGroupPair).where(
+            ChannelGroupPair.id == pair_id,
+            ChannelGroupPair.user_id == current_user.id,
+        )
+    )
+    pair = result.scalar_one_or_none()
+    if not pair:
+        raise HTTPException(404, "Pair not found")
+
+    if body.bot_id is not None:
+        bot_result = await session.execute(
+            select(Bot).where(Bot.id == body.bot_id, Bot.user_id == current_user.id)
+        )
+        if not bot_result.scalar_one_or_none():
+            raise HTTPException(404, "Bot not found")
+        pair.bot_id = body.bot_id
+
+    if body.channel_id is not None:
+        pair.channel_id = body.channel_id
+    if body.channel_name is not None:
+        pair.channel_name = body.channel_name
+    if body.group_id is not None:
+        pair.group_id = body.group_id
+    if body.group_name is not None:
+        pair.group_name = body.group_name
+    if body.group_link is not None:
+        pair.group_link = body.group_link
+
+    await session.commit()
+    return {"ok": True}
 
 
 @router.patch("/pairs/{pair_id}/toggle")

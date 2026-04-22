@@ -7,7 +7,7 @@
     <h1 class="text-2xl font-bold text-gray-900">Пары каналов</h1>
     <p class="text-sm text-gray-500 mt-1">Канал → Группа обсуждений</p>
   </div>
-  <button onclick="document.getElementById('add-modal').classList.remove('hidden')"
+  <button onclick="openAddModal()"
           class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
     + Добавить пару
   </button>
@@ -36,6 +36,9 @@
         <td class="px-5 py-3">
           <p class="font-medium text-gray-800">{{ p.group_name or "—" }}</p>
           <p class="text-xs text-gray-400 font-mono">{{ p.group_id }}</p>
+          {% if p.group_link %}
+          <a href="{{ p.group_link }}" target="_blank" class="text-xs text-indigo-400 hover:underline truncate block max-w-[180px]">{{ p.group_link }}</a>
+          {% endif %}
         </td>
         <td class="px-5 py-3">
           {% if p.bot_id and bot_map.get(p.bot_id) %}
@@ -59,6 +62,10 @@
           </span>
         </td>
         <td class="px-5 py-3 text-right space-x-2">
+          <button onclick='openEditModal({{ p.id }}, {{ p.bot_id or "null" }}, "{{ p.channel_id }}", "{{ p.channel_name }}", "{{ p.group_id }}", "{{ p.group_name }}", "{{ p.group_link }}")'
+                  class="text-xs px-2 py-1 rounded border border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 transition-colors">
+            Изменить
+          </button>
           <button onclick="togglePair({{ p.id }}, {{ 'true' if p.enabled else 'false' }})"
                   class="text-xs px-2 py-1 rounded border border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 transition-colors">
             {{ "Выключить" if p.enabled else "Включить" }}
@@ -81,17 +88,22 @@
   {% endif %}
 </div>
 
-<!-- Add pair modal -->
-<div id="add-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">Добавить пару</h2>
+<!-- Modal (Add / Edit) -->
+<div id="pair-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
+
+    <h2 id="modal-title" class="text-lg font-semibold text-gray-900 mb-1">Добавить пару</h2>
+    <p class="text-xs text-gray-400 mb-4">Выберите бота — каналы и группы загрузятся автоматически</p>
 
     <div id="modal-error" class="hidden mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600"></div>
 
-    <form id="add-form" class="space-y-3">
+    <form id="pair-form" class="space-y-4">
+      <input type="hidden" id="edit-pair-id" value="">
+
+      <!-- Bot selector -->
       <div>
         <label class="block text-xs font-medium text-gray-600 mb-1">Бот</label>
-        <select name="bot_id" required
+        <select id="f-bot-id" name="bot_id" required
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
           <option value="">— Выбрать бота —</option>
           {% for b in bots %}
@@ -99,44 +111,55 @@
           {% endfor %}
         </select>
         {% if not bots %}
-        <p class="text-xs text-red-400 mt-1">
-          Нет активных ботов. <a href="/bots" class="underline">Добавьте бота</a> сначала.
-        </p>
+        <p class="text-xs text-red-400 mt-1">Нет активных ботов. <a href="/bots" class="underline">Добавьте бота</a> сначала.</p>
         {% endif %}
       </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">ID канала</label>
-          <input name="channel_id" required placeholder="-1001234567890"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Название канала</label>
-          <input name="channel_name" placeholder="Мой канал"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">ID группы</label>
-          <input name="group_id" required placeholder="-1001234567891"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Название группы</label>
-          <input name="group_name" placeholder="Обсуждения"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-        </div>
+
+      <!-- Loading indicator -->
+      <div id="chats-loading" class="hidden text-xs text-indigo-500 flex items-center gap-1">
+        <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Загружаю каналы и группы...
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-600 mb-1">Ссылка на группу (для кнопки)</label>
-        <input name="group_link" required placeholder="https://max.ru/mygroup"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-        <p class="text-xs text-gray-400 mt-1">Будет использована в кнопке «💬 Прокомментировать»</p>
+      <div id="chats-error" class="hidden text-xs text-red-500"></div>
+
+      <!-- Channel selector -->
+      <div id="channel-block" class="hidden">
+        <label class="block text-xs font-medium text-gray-600 mb-1">Канал</label>
+        <select id="f-channel" required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <option value="">— Выбрать канал —</option>
+        </select>
+        <p id="channel-id-hint" class="text-xs text-gray-400 font-mono mt-1"></p>
       </div>
+
+      <!-- Group selector -->
+      <div id="group-block" class="hidden">
+        <label class="block text-xs font-medium text-gray-600 mb-1">Группа обсуждений</label>
+        <select id="f-group" required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <option value="">— Выбрать группу —</option>
+        </select>
+        <p id="group-id-hint" class="text-xs text-gray-400 font-mono mt-1"></p>
+      </div>
+
+      <!-- Group link -->
+      <div id="link-block" class="hidden">
+        <label class="block text-xs font-medium text-gray-600 mb-1">
+          Ссылка для кнопки «💬 Прокомментировать»
+        </label>
+        <input id="f-group-link" type="url"
+               placeholder="https://max.ru/join/..."
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"/>
+        <div id="link-hint" class="mt-1.5 text-xs text-gray-400 leading-relaxed"></div>
+      </div>
+
       <div class="flex justify-end gap-2 pt-2">
-        <button type="button"
-                onclick="document.getElementById('add-modal').classList.add('hidden')"
+        <button type="button" onclick="closeModal()"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Отмена</button>
-        <button type="submit"
+        <button type="submit" id="modal-submit"
                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">
           Сохранить
         </button>
@@ -148,14 +171,192 @@
 
 {% block scripts %}
 <script>
-  document.getElementById("add-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const body = Object.fromEntries(fd);
+  // ── State ──────────────────────────────────────────────────────────────────
+  let chatsData = { channels: [], groups: [] };
 
-    const res = await fetch("/api/pairs", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
+  // ── Modal open/close ───────────────────────────────────────────────────────
+  function openAddModal() {
+    document.getElementById("modal-title").textContent = "Добавить пару";
+    document.getElementById("edit-pair-id").value = "";
+    resetForm();
+    document.getElementById("pair-modal").classList.remove("hidden");
+  }
+
+  function openEditModal(id, botId, channelId, channelName, groupId, groupName, groupLink) {
+    document.getElementById("modal-title").textContent = "Редактировать пару";
+    document.getElementById("edit-pair-id").value = id;
+    resetForm();
+
+    // Pre-fill bot
+    const botSel = document.getElementById("f-bot-id");
+    if (botId) botSel.value = String(botId);
+
+    // Load chats for the selected bot, then pre-select channel/group
+    if (botId) {
+      loadChats(botId, channelId, groupId, groupLink);
+    }
+
+    document.getElementById("pair-modal").classList.remove("hidden");
+  }
+
+  function closeModal() {
+    document.getElementById("pair-modal").classList.add("hidden");
+  }
+
+  function resetForm() {
+    document.getElementById("pair-form").reset();
+    document.getElementById("modal-error").classList.add("hidden");
+    document.getElementById("chats-error").classList.add("hidden");
+    document.getElementById("chats-loading").classList.add("hidden");
+    document.getElementById("channel-block").classList.add("hidden");
+    document.getElementById("group-block").classList.add("hidden");
+    document.getElementById("link-block").classList.add("hidden");
+    document.getElementById("channel-id-hint").textContent = "";
+    document.getElementById("group-id-hint").textContent = "";
+    document.getElementById("f-group-link").value = "";
+    chatsData = { channels: [], groups: [] };
+  }
+
+  // ── Load chats from API ────────────────────────────────────────────────────
+  async function loadChats(botId, preChannelId = null, preGroupId = null, preGroupLink = null) {
+    document.getElementById("chats-loading").classList.remove("hidden");
+    document.getElementById("chats-error").classList.add("hidden");
+    document.getElementById("channel-block").classList.add("hidden");
+    document.getElementById("group-block").classList.add("hidden");
+    document.getElementById("link-block").classList.add("hidden");
+
+    try {
+      const res = await fetch(`/api/bots/${botId}/chats`);
+      if (!res.ok) throw new Error((await res.json()).detail || "Ошибка загрузки");
+      chatsData = await res.json();
+    } catch (e) {
+      document.getElementById("chats-error").textContent = "Не удалось загрузить чаты: " + e.message;
+      document.getElementById("chats-error").classList.remove("hidden");
+      document.getElementById("chats-loading").classList.add("hidden");
+      return;
+    }
+
+    document.getElementById("chats-loading").classList.add("hidden");
+
+    // Fill channel dropdown
+    const chanSel = document.getElementById("f-channel");
+    chanSel.innerHTML = '<option value="">— Выбрать канал —</option>';
+    chatsData.channels.forEach(c => {
+      const opt = new Option(c.title, c.chat_id);
+      chanSel.appendChild(opt);
+    });
+    document.getElementById("channel-block").classList.remove("hidden");
+
+    // Fill group dropdown
+    const grpSel = document.getElementById("f-group");
+    grpSel.innerHTML = '<option value="">— Выбрать группу —</option>';
+    chatsData.groups.forEach(g => {
+      const opt = new Option(g.title, g.chat_id);
+      grpSel.appendChild(opt);
+    });
+    document.getElementById("group-block").classList.remove("hidden");
+    document.getElementById("link-block").classList.remove("hidden");
+
+    // Pre-select values in edit mode
+    if (preChannelId) {
+      chanSel.value = preChannelId;
+      updateChannelHint(preChannelId);
+    }
+    if (preGroupId) {
+      grpSel.value = preGroupId;
+      updateGroupHint(preGroupId, preGroupLink);
+    }
+    if (preGroupLink) {
+      document.getElementById("f-group-link").value = preGroupLink;
+    }
+  }
+
+  // ── Bot selector change ────────────────────────────────────────────────────
+  document.getElementById("f-bot-id").addEventListener("change", e => {
+    const botId = e.target.value;
+    if (botId) loadChats(botId);
+    else {
+      document.getElementById("channel-block").classList.add("hidden");
+      document.getElementById("group-block").classList.add("hidden");
+      document.getElementById("link-block").classList.add("hidden");
+    }
+  });
+
+  // ── Channel selector change ────────────────────────────────────────────────
+  document.getElementById("f-channel").addEventListener("change", e => {
+    updateChannelHint(e.target.value);
+  });
+
+  function updateChannelHint(chatId) {
+    document.getElementById("channel-id-hint").textContent = chatId ? `ID: ${chatId}` : "";
+  }
+
+  // ── Group selector change ──────────────────────────────────────────────────
+  document.getElementById("f-group").addEventListener("change", e => {
+    updateGroupHint(e.target.value, null);
+  });
+
+  function updateGroupHint(chatId, existingLink) {
+    const hint = document.getElementById("group-id-hint");
+    const linkInput = document.getElementById("f-group-link");
+    const linkHint = document.getElementById("link-hint");
+
+    hint.textContent = chatId ? `ID: ${chatId}` : "";
+
+    if (!chatId) return;
+
+    // Try to auto-fill link from chats data
+    const grp = chatsData.groups.find(g => g.chat_id === chatId);
+    if (grp && grp.link) {
+      linkInput.value = grp.link;
+      linkHint.innerHTML = `✅ Ссылка определена автоматически`;
+    } else if (existingLink) {
+      linkInput.value = existingLink;
+      linkHint.innerHTML = `✅ Текущая ссылка сохранена`;
+    } else {
+      linkInput.value = "";
+      linkHint.innerHTML = `
+        ℹ️ Группа приватная — ссылку нужно вставить вручную.<br>
+        В MAX: откройте группу → кнопка <b>•••</b> → <b>Пригласить участников</b> → скопируйте ссылку <code>https://max.ru/join/...</code>
+      `;
+    }
+  }
+
+  // ── Form submit ────────────────────────────────────────────────────────────
+  document.getElementById("pair-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const pairId = document.getElementById("edit-pair-id").value;
+    const botId = document.getElementById("f-bot-id").value;
+    const channelSel = document.getElementById("f-channel");
+    const groupSel = document.getElementById("f-group");
+    const channelId = channelSel.value;
+    const groupId = groupSel.value;
+    const channelName = channelSel.options[channelSel.selectedIndex]?.text || "";
+    const groupName = groupSel.options[groupSel.selectedIndex]?.text || "";
+    const groupLink = document.getElementById("f-group-link").value.trim();
+
+    if (!botId || !channelId || !groupId) {
+      showError("Выберите бота, канал и группу");
+      return;
+    }
+
+    const body = {
+      bot_id: parseInt(botId),
+      channel_id: channelId,
+      channel_name: channelName,
+      group_id: groupId,
+      group_name: groupName,
+      group_link: groupLink,
+    };
+
+    const isEdit = !!pairId;
+    const url = isEdit ? `/api/pairs/${pairId}` : "/api/pairs";
+    const method = isEdit ? "PATCH" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
@@ -163,20 +364,25 @@
       window.location.reload();
     } else {
       const err = await res.json();
-      const el = document.getElementById("modal-error");
-      el.textContent = err.detail || "Ошибка";
-      el.classList.remove("hidden");
+      showError(err.detail || "Ошибка сохранения");
     }
   });
 
+  function showError(msg) {
+    const el = document.getElementById("modal-error");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+
+  // ── Toggle / Delete ────────────────────────────────────────────────────────
   async function togglePair(id, isEnabled) {
-    const res = await fetch(`/api/pairs/${id}/toggle`, {method: "PATCH"});
+    const res = await fetch(`/api/pairs/${id}/toggle`, { method: "PATCH" });
     if (res.ok) window.location.reload();
   }
 
   async function deletePair(id) {
     if (!confirm("Удалить пару? Связанные записи сохранятся.")) return;
-    const res = await fetch(`/api/pairs/${id}`, {method: "DELETE"});
+    const res = await fetch(`/api/pairs/${id}`, { method: "DELETE" });
     if (res.ok) document.getElementById(`pair-${id}`).remove();
   }
 </script>

@@ -88,13 +88,15 @@ async def _handle_message_created(
     # ── Step 1: Duplicate post to discussion group ────────────────────────────
     header = discussion_header(pair.channel_name or chat_id, message_id)
     group_text = header + (text or "")
-    original_attachments = _extract_media_attachments(message_body)
+    # Only forward media attachments — share tokens are context-specific and
+    # invalid in a different chat. URL in text will auto-generate a fresh preview.
+    forwardable_attachments = _extract_media_attachments(message_body)
 
     try:
         group_resp = await client.send_message(
             chat_id=pair.group_id,
             text=group_text,
-            attachments=original_attachments or None,
+            attachments=forwardable_attachments or None,
         )
     except MaxAPIError as exc:
         logger.error("Failed to duplicate post to group: %s", exc)
@@ -107,9 +109,11 @@ async def _handle_message_created(
 
     # ── Step 2: Add inline button to original channel post ───────────────────
     button = comment_button(pair.group_link, group_message_id)
-    # Pass original attachments so link previews (share) are preserved after edit
+    # Include all same-chat attachments (share preview + media) so the edit
+    # preserves the link preview alongside the new button.
+    same_chat_attachments = _extract_same_chat_attachments(message_body)
     edited = await _try_edit_with_button(
-        client, chat_id, message_id, text, button, original_attachments
+        client, chat_id, message_id, text, button, same_chat_attachments
     )
 
     if not edited:
@@ -167,8 +171,26 @@ async def _try_edit_with_button(
 
 def _extract_media_attachments(body: dict) -> list[dict]:
     """
-    Extract re-sendable attachments from a message body.
-    Captures: image, video, audio, file (by token) and share/link previews (by token).
+    Extract attachments that can be forwarded to another chat (by token).
+    Captures: image, video, audio, file.
+    NOTE: "share" (link preview) tokens are context-specific and cannot be
+    re-sent to a different chat — so they are intentionally excluded here.
+    The URL in the text will auto-generate a fresh preview in the group.
+    """
+    attachments = []
+    for att in body.get("attachments", []):
+        att_type = att.get("type", "")
+        payload = att.get("payload", {})
+        token = payload.get("token")
+        if att_type in ("image", "video", "audio", "file") and token:
+            attachments.append({"type": att_type, "payload": {"token": token}})
+    return attachments
+
+
+def _extract_same_chat_attachments(body: dict) -> list[dict]:
+    """
+    Extract all re-sendable attachments for use within the SAME chat (e.g. edit).
+    Includes "share" (link preview) — token is valid in the originating chat.
     """
     attachments = []
     for att in body.get("attachments", []):

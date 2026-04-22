@@ -4,10 +4,9 @@ Event handlers for Max Bot API updates.
 Flow for new channel post:
   1. Look up the ChannelGroupPair for this channel + bot.
   2. Duplicate post to the discussion group.
-  3. Try to edit the original post to add inline button (works only if bot authored it).
-  4. If edit fails (403/human-authored), post a reply-with-button instead.
-  5. Save PostLink: channel_post_id → group_message_id.
-  6. Write EventLog entry.
+  3. Send a standalone button message to the channel (preserves original post untouched).
+  4. Save PostLink: channel_post_id → group_message_id.
+  5. Write EventLog entry.
 """
 import logging
 
@@ -107,29 +106,22 @@ async def _handle_message_created(
 
     group_message_id = str(group_resp.get("message", {}).get("mid", ""))
 
-    # ── Step 2: Add inline button to original channel post ───────────────────
+    # ── Step 2: Post button as standalone message in the channel ─────────────
+    # We intentionally do NOT edit the original post (editing removes link previews)
+    # and do NOT use reply (reply shows an ugly quote of the original).
+    # A plain message with just the inline keyboard is the cleanest approach.
     button = comment_button(pair.group_link, group_message_id)
-    # Include all same-chat attachments (share preview + media) so the edit
-    # preserves the link preview alongside the new button.
-    same_chat_attachments = _extract_same_chat_attachments(message_body)
-    edited = await _try_edit_with_button(
-        client, chat_id, message_id, text, button, same_chat_attachments
-    )
-
-    if not edited:
-        # Fallback: post a reply with the button in the channel
-        logger.info("Cannot edit post %s (human-authored). Posting reply-with-button.", message_id)
-        try:
-            await client.reply_to_message(
-                chat_id=chat_id,
-                message_id=message_id,
-                text="",
-                attachments=[button],
-            )
-        except MaxAPIError as exc:
-            logger.warning("Reply-with-button failed: %s", exc)
-            await _log(session, pair.user_id, bot_id, LogLevel.warning,
-                       f"Could not attach button to post {message_id}: {exc}")
+    try:
+        await client.send_message(
+            chat_id=chat_id,
+            text="\u200b",   # zero-width space — satisfies required text field
+            attachments=[button],
+            notify=False,
+        )
+    except MaxAPIError as exc:
+        logger.warning("Failed to send button to channel: %s", exc)
+        await _log(session, pair.user_id, bot_id, LogLevel.warning,
+                   f"Could not send button for post {message_id}: {exc}")
 
     # ── Step 3: Persist link ──────────────────────────────────────────────────
     session.add(PostLink(
@@ -143,30 +135,6 @@ async def _handle_message_created(
     )
     await session.commit()
 
-
-async def _try_edit_with_button(
-    client: MaxClient,
-    chat_id: str,
-    message_id: str,
-    text: str,
-    button: dict,
-    original_attachments: list[dict] | None = None,
-) -> bool:
-    """
-    Attempts to edit the original post to attach an inline button.
-    Preserves original attachments (link previews, media) by placing them
-    before the button in the attachments array.
-    Returns True on success, False on permission error.
-    """
-    attachments = list(original_attachments or []) + [button]
-    try:
-        await client.edit_message(message_id=message_id, text=text or "", attachments=attachments)
-        return True
-    except MaxAPIError as exc:
-        if exc.status in (403, 400):
-            return False
-        logger.warning("Unexpected error editing message %s: %s", message_id, exc)
-        return False
 
 
 def _extract_media_attachments(body: dict) -> list[dict]:
@@ -187,19 +155,6 @@ def _extract_media_attachments(body: dict) -> list[dict]:
     return attachments
 
 
-def _extract_same_chat_attachments(body: dict) -> list[dict]:
-    """
-    Extract all re-sendable attachments for use within the SAME chat (e.g. edit).
-    Includes "share" (link preview) — token is valid in the originating chat.
-    """
-    attachments = []
-    for att in body.get("attachments", []):
-        att_type = att.get("type", "")
-        payload = att.get("payload", {})
-        token = payload.get("token")
-        if att_type in ("image", "video", "audio", "file", "share") and token:
-            attachments.append({"type": att_type, "payload": {"token": token}})
-    return attachments
 
 
 async def _log(

@@ -52,8 +52,8 @@ async def _handle_message_created(
         return
 
     chat_id = str(chat.get("chat_id", ""))
-    message_id = str(message.get("mid", ""))
     message_body = message.get("body", {})
+    message_id = str(message_body.get("mid", ""))
     text = message_body.get("text", "")
 
     if not chat_id or not message_id:

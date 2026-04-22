@@ -114,12 +114,11 @@ async def _handle_message_created(
     try:
         await client.send_message(
             chat_id=chat_id,
-            text=" ",
+            text="💬",
             attachments=[button],
-            notify=False,
         )
     except MaxAPIError as exc:
-        logger.warning("Failed to send button to channel: %s", exc)
+        logger.warning("Failed to send button to channel (status=%s body=%s)", exc.status, exc.body)
         await _log(session, pair.user_id, bot_id, LogLevel.warning,
                    f"Could not send button for post {message_id}: {exc}")
 

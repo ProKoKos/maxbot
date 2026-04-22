@@ -94,13 +94,11 @@ class MaxClient:
         text: str,
         attachments: list[dict] | None = None,
         notify: bool = True,
-        disable_link_preview: bool = False,
         format: str = "markdown",
     ) -> dict:
         payload: dict[str, Any] = {
             "text": text,
             "notify": notify,
-            "disable_link_preview": disable_link_preview,
             "format": format,
         }
         if attachments:

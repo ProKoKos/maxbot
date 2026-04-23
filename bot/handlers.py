@@ -349,6 +349,9 @@ async def _handle_member_added(
     )
     await session.commit()
 
+    # Restrict new member to read-only until verification completes
+    await client.restrict_member(chat_id=chat_id, user_id=max_user_id)
+
 
 # ── Verification: user clicked /start in bot ──────────────────────────────────
 
@@ -447,6 +450,9 @@ async def _handle_bot_started(
         f"(config {config.id})"
     )
     await session.commit()
+
+    # Restore full write permissions for the verified member
+    await client.unrestrict_member(chat_id=config.group_id, user_id=vr.max_user_id)
 
     # Delete group verification message to keep the chat clean
     if vr.group_message_id:

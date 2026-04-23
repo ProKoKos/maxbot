@@ -161,39 +161,6 @@ class MaxClient:
             params={"user_id": user_id},
         )
 
-    async def restrict_member(self, chat_id: str, user_id: str) -> None:
-        """
-        Restrict a member to read-only (no write permissions).
-        Used to mute new members until they complete verification.
-        Errors are logged as warnings but not raised.
-        """
-        try:
-            await self._request(
-                "PATCH", f"/chats/{chat_id}/members",
-                params={"user_id": user_id},
-                json={"permissions": []},
-            )
-        except MaxAPIError as exc:
-            logger.warning(
-                "Could not restrict member %s in chat %s: %s", user_id, chat_id, exc
-            )
-
-    async def unrestrict_member(self, chat_id: str, user_id: str) -> None:
-        """
-        Restore full write permissions for a member after verification.
-        Errors are logged as warnings but not raised.
-        """
-        try:
-            await self._request(
-                "PATCH", f"/chats/{chat_id}/members",
-                params={"user_id": user_id},
-                json={"permissions": ["write", "read_all_messages"]},
-            )
-        except MaxAPIError as exc:
-            logger.warning(
-                "Could not unrestrict member %s in chat %s: %s", user_id, chat_id, exc
-            )
-
     async def send_action(self, chat_id: str, action: str = "typing_on") -> None:
         """Send a chat action (e.g. typing indicator). Errors are swallowed."""
         try:

@@ -26,7 +26,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -97,6 +97,8 @@ async def _handle_message_created(
     chat_type = chat.get("chat_type", "")
 
     if chat_type != "channel":
+        # Non-channel message — delete it if the sender is still pending verification
+        await _delete_if_unverified(update, session, client, bot_id)
         return
 
     chat_id = str(chat.get("chat_id", ""))
@@ -349,9 +351,6 @@ async def _handle_member_added(
     )
     await session.commit()
 
-    # Restrict new member to read-only until verification completes
-    await client.restrict_member(chat_id=chat_id, user_id=max_user_id)
-
 
 # ── Verification: user clicked /start in bot ──────────────────────────────────
 
@@ -451,9 +450,6 @@ async def _handle_bot_started(
     )
     await session.commit()
 
-    # Restore full write permissions for the verified member
-    await client.unrestrict_member(chat_id=config.group_id, user_id=vr.max_user_id)
-
     # Delete group verification message to keep the chat clean
     if vr.group_message_id:
         try:
@@ -491,6 +487,60 @@ async def _handle_bot_started(
 
     await _send_dm_safe(client, chat_id_for_dm, welcome_text,
                         attachments=[return_button] if return_button else None)
+
+
+# ── Delete messages from unverified members ───────────────────────────────────
+
+async def _delete_if_unverified(
+    update: dict,
+    session: AsyncSession,
+    client: MaxClient,
+    bot_id: int | None = None,
+) -> None:
+    """
+    If the message author has a pending VerificationRequest in this group,
+    silently delete the message to enforce read-only until verification passes.
+    """
+    message = update.get("message", {})
+    chat = message.get("recipient", {})
+    chat_id = str(chat.get("chat_id", ""))
+    sender = message.get("sender", {})
+    sender_id = str(sender.get("user_id", ""))
+    message_body = message.get("body", {})
+    message_id = str(message_body.get("mid", ""))
+
+    if not chat_id or not sender_id or not message_id:
+        return
+
+    # Build subqueries filtered by group_id (and optionally bot_id)
+    wc_q = select(WelcomeConfig.id).where(WelcomeConfig.group_id == chat_id)
+    pair_q = select(ChannelGroupPair.id).where(ChannelGroupPair.group_id == chat_id)
+    if bot_id is not None:
+        wc_q = wc_q.where(WelcomeConfig.bot_id == bot_id)
+        pair_q = pair_q.where(ChannelGroupPair.bot_id == bot_id)
+
+    result = await session.execute(
+        select(VerificationRequest).where(
+            VerificationRequest.max_user_id == sender_id,
+            VerificationRequest.status == VerificationStatus.pending,
+            or_(
+                VerificationRequest.welcome_config_id.in_(wc_q),
+                VerificationRequest.pair_id.in_(pair_q),
+            ),
+        )
+    )
+    vr = result.scalar_one_or_none()
+    if not vr:
+        return
+
+    try:
+        await client.delete_message(message_id=message_id)
+        logger.info(
+            "Deleted message %s from unverified user %s in group %s",
+            message_id, sender_id, chat_id,
+        )
+    except MaxAPIError as exc:
+        logger.warning("Could not delete unverified message %s: %s", message_id, exc)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

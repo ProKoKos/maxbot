@@ -77,7 +77,7 @@ async def handle_update(
         await _handle_message_created(update, session, client, bot_id=bot_id)
     elif update_type == "bot_started":
         await _handle_bot_started(update, session, client, bot_id=bot_id)
-    elif update_type == "chat_member_added":
+    elif update_type in ("user_added", "chat_member_added"):
         await _handle_member_added(update, session, client, bot_id=bot_id)
     else:
         # Log at INFO so we can diagnose unknown event types in production

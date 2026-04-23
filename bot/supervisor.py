@@ -166,6 +166,14 @@ class BotSupervisor:
                 new_marker = data.get("marker")
 
                 if updates:
+                    for upd in updates:
+                        # TEMP DEBUG: log every raw update so we can identify event types
+                        logger.info(
+                            "Bot %d RAW update: type=%r keys=%s",
+                            bot_id,
+                            upd.get("update_type") or upd.get("type"),
+                            list(upd.keys()),
+                        )
                     async with AsyncSessionLocal() as session:
                         for upd in updates:
                             try:

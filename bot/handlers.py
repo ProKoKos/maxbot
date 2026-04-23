@@ -80,8 +80,7 @@ async def handle_update(
     elif update_type in ("user_added", "chat_member_added"):
         await _handle_member_added(update, session, client, bot_id=bot_id)
     else:
-        # Log at INFO so we can diagnose unknown event types in production
-        logger.info("Unhandled update type: %r | keys: %s", update_type, list(update.keys()))
+        logger.debug("Unhandled update type: %r", update_type)
 
 
 # ── Channel post duplication ───────────────────────────────────────────────────

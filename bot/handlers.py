@@ -9,8 +9,8 @@ Flow for new channel post:
   5. Write EventLog entry.
 
 Flow for verification (captcha-gate):
-  chat_member_added:
-    1. Look up pair by group_id; skip if verification not enabled.
+  user_added / chat_member_added:
+    1. Look up WelcomeConfig by group_id + bot_id (new); fall back to ChannelGroupPair.
     2. Skip if the joining user IS the bot itself.
     3. Generate a secret token; save VerificationRequest with deadline.
     4. Send verification message with deep-link button to group.
@@ -19,8 +19,8 @@ Flow for verification (captcha-gate):
     1. Look up VerificationRequest by token.
     2. Check deadline not passed and status == pending.
     3. Mark status=verified.
-    4. Edit group message to show success.
-    5. If verification_welcome_dm configured: send DM.
+    4. Delete group message to keep the chat clean.
+    5. If verification_welcome_dm configured: send DM with "return to group" button.
 """
 import logging
 import secrets
@@ -40,6 +40,7 @@ from db.models import (
     PostLink,
     VerificationRequest,
     VerificationStatus,
+    WelcomeConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,8 +194,8 @@ async def _handle_member_added(
     bot_id: int | None = None,
 ) -> None:
     """
-    Fired when someone joins a group. If verification is enabled for this group,
-    send a captcha-gate message with a deep-link button.
+    Fired when someone joins a group. If a WelcomeConfig (or pair verification)
+    is enabled for this group, send a captcha-gate message with a deep-link button.
     """
     # Extract chat_id — Max may use "chat_id" at top level or inside "chat" dict
     chat_id = str(
@@ -206,67 +207,98 @@ async def _handle_member_added(
     user_name = user_info.get("name") or user_info.get("username") or "Участник"
 
     if not chat_id or not max_user_id:
-        logger.debug("chat_member_added: missing chat_id or user_id")
+        logger.debug("user_added: missing chat_id or user_id")
         return
 
-    # Look up the pair for this group
-    query = select(ChannelGroupPair).where(
-        ChannelGroupPair.group_id == chat_id,
-        ChannelGroupPair.enabled == True,  # noqa: E712
-        ChannelGroupPair.verification_enabled == True,  # noqa: E712
-    )
+    # ── 1. Try WelcomeConfig first (standalone, new) ─────────────────────────
+    wc: WelcomeConfig | None = None
+    pair: ChannelGroupPair | None = None
+
     if bot_id is not None:
-        query = query.where(ChannelGroupPair.bot_id == bot_id)
+        wc_result = await session.execute(
+            select(WelcomeConfig)
+            .where(
+                WelcomeConfig.group_id == chat_id,
+                WelcomeConfig.bot_id == bot_id,
+                WelcomeConfig.verification_enabled == True,  # noqa: E712
+            )
+            .options(selectinload(WelcomeConfig.bot))
+        )
+        wc = wc_result.scalar_one_or_none()
 
-    result = await session.execute(query.options(selectinload(ChannelGroupPair.bot)))
-    pair = result.scalar_one_or_none()
-    if not pair:
+    # ── 2. Fall back to pair-based verification ───────────────────────────────
+    if wc is None:
+        pair_query = select(ChannelGroupPair).where(
+            ChannelGroupPair.group_id == chat_id,
+            ChannelGroupPair.enabled == True,  # noqa: E712
+            ChannelGroupPair.verification_enabled == True,  # noqa: E712
+        )
+        if bot_id is not None:
+            pair_query = pair_query.where(ChannelGroupPair.bot_id == bot_id)
+        pair_result = await session.execute(
+            pair_query.options(selectinload(ChannelGroupPair.bot))
+        )
+        pair = pair_result.scalar_one_or_none()
+
+    config = wc or pair
+    if not config:
         return
+
+    bot: Bot | None = config.bot
+    user_id = config.user_id
 
     # Skip if this IS the bot itself joining the chat
-    bot: Bot | None = pair.bot
     if bot and str(bot.max_user_id) == max_user_id:
         logger.debug("Bot itself joined group %s — skipping verification", chat_id)
         return
 
     # Skip if there's already a pending verification for this user in this group
-    existing = await session.execute(
-        select(VerificationRequest).where(
+    if wc is not None:
+        existing_q = select(VerificationRequest).where(
+            VerificationRequest.welcome_config_id == wc.id,
+            VerificationRequest.max_user_id == max_user_id,
+            VerificationRequest.status == VerificationStatus.pending,
+        )
+    else:
+        existing_q = select(VerificationRequest).where(
             VerificationRequest.pair_id == pair.id,
             VerificationRequest.max_user_id == max_user_id,
             VerificationRequest.status == VerificationStatus.pending,
         )
-    )
-    if existing.scalar_one_or_none():
+    if (await session.execute(existing_q)).scalar_one_or_none():
         logger.debug("Verification already pending for user %s in group %s", max_user_id, chat_id)
         return
 
     logger.info(
-        "New member %s (%s) in group %s — verification required (pair=%d)",
-        user_name, max_user_id, chat_id, pair.id,
+        "New member %s (%s) in group %s — verification required (%s=%d)",
+        user_name, max_user_id, chat_id,
+        "welcome_config" if wc else "pair",
+        config.id,
     )
 
     # Build verification token and deadline
     token = secrets.token_hex(24)  # 48-char hex string
-    deadline = datetime.now(timezone.utc) + timedelta(minutes=pair.verification_timeout_min)
+    deadline = datetime.now(timezone.utc) + timedelta(minutes=config.verification_timeout_min)
 
     # Get bot username for deep-link
     bot_username = (bot.max_username if bot else None) or ""
 
     # Build message text from template
-    msg_template = pair.verification_message or _DEFAULT_VERIFY_MSG
+    msg_template = config.verification_message or _DEFAULT_VERIFY_MSG
     msg_text = (
         msg_template
         .replace("{имя}", user_name)
-        .replace("{группа}", pair.group_name or chat_id)
-        .replace("{минут}", str(pair.verification_timeout_min))
+        .replace("{группа}", config.group_name or chat_id)
+        .replace("{минут}", str(config.verification_timeout_min))
     )
 
     # Build deep-link button
-    btn_text = pair.verification_button_text or _DEFAULT_VERIFY_BTN
+    btn_text = config.verification_button_text or _DEFAULT_VERIFY_BTN
     deep_link_url = f"https://max.ru/{bot_username}?start=verify_{token}" if bot_username else ""
     if not deep_link_url:
-        logger.warning("Bot has no username — cannot generate verification deep-link for pair %d", pair.id)
+        logger.warning(
+            "Bot has no username — cannot generate verification deep-link for config %d", config.id
+        )
         return
 
     verify_button = {
@@ -293,14 +325,15 @@ async def _handle_member_added(
         )
     except MaxAPIError as exc:
         logger.error("Failed to send verification message to group %s: %s", chat_id, exc)
-        await _log(session, pair.user_id, bot_id, LogLevel.error,
+        await _log(session, user_id, bot_id, LogLevel.error,
                    f"Verification msg failed for {user_name} in group {chat_id}: {exc}")
         await session.commit()
         return
 
-    # Save verification request
+    # Save verification request (link to WelcomeConfig or pair)
     vr = VerificationRequest(
-        pair_id=pair.id,
+        welcome_config_id=wc.id if wc is not None else None,
+        pair_id=pair.id if pair is not None else None,
         max_user_id=max_user_id,
         user_name=user_name,
         token=token,
@@ -310,9 +343,9 @@ async def _handle_member_added(
     )
     session.add(vr)
     await _log(
-        session, pair.user_id, bot_id, LogLevel.info,
+        session, user_id, bot_id, LogLevel.info,
         f"Verification started for {user_name} ({max_user_id}) in group {chat_id} "
-        f"(pair {pair.id}), deadline {deadline.isoformat()}"
+        f"(config={config.id}), deadline {deadline.isoformat()}"
     )
     await session.commit()
 
@@ -352,11 +385,14 @@ async def _handle_bot_started(
 
     logger.info("Verification response: user %s, token %s", max_user_id, token[:8] + "...")
 
-    # Look up request
+    # Look up request — eagerly load both config types
     result = await session.execute(
         select(VerificationRequest)
         .where(VerificationRequest.token == token)
-        .options(selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot))
+        .options(
+            selectinload(VerificationRequest.welcome_config).selectinload(WelcomeConfig.bot),
+            selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot),
+        )
     )
     vr = result.scalar_one_or_none()
 
@@ -366,7 +402,18 @@ async def _handle_bot_started(
                             "⚠️ Ссылка верификации не найдена или устарела.")
         return
 
-    pair = vr.pair
+    # Resolve config (WelcomeConfig takes priority, fall back to pair)
+    if vr.welcome_config_id and vr.welcome_config:
+        config = vr.welcome_config
+        user_id = config.user_id
+    elif vr.pair_id and vr.pair:
+        config = vr.pair
+        user_id = config.user_id
+    else:
+        await _send_dm_safe(client, chat_id_for_dm,
+                            "⚠️ Конфигурация верификации удалена. Обратитесь к администратору.")
+        return
+
     now = datetime.now(timezone.utc)
 
     # Check already processed
@@ -382,21 +429,22 @@ async def _handle_bot_started(
     # Check deadline
     if now > vr.deadline:
         vr.status = VerificationStatus.expired
-        await _log(session, pair.user_id, bot_id, LogLevel.warning,
+        await _log(session, user_id, bot_id, LogLevel.warning,
                    f"Verification expired for {vr.user_name} ({vr.max_user_id})")
         await session.commit()
         await _send_dm_safe(
             client, chat_id_for_dm,
             f"⏰ К сожалению, время на верификацию истекло. "
-            f"Обратитесь к администраторам группы *{pair.group_name}*."
+            f"Обратитесь к администраторам группы *{config.group_name}*."
         )
         return
 
     # ✅ Mark as verified
     vr.status = VerificationStatus.verified
     await _log(
-        session, pair.user_id, bot_id, LogLevel.info,
-        f"User {vr.user_name} ({vr.max_user_id}) verified for group {pair.group_id} (pair {pair.id})"
+        session, user_id, bot_id, LogLevel.info,
+        f"User {vr.user_name} ({vr.max_user_id}) verified for group {config.group_id} "
+        f"(config {config.id})"
     )
     await session.commit()
 
@@ -405,28 +453,32 @@ async def _handle_bot_started(
         try:
             await client.delete_message(message_id=vr.group_message_id)
         except MaxAPIError as exc:
-            logger.warning("Could not delete group verification message %s: %s", vr.group_message_id, exc)
+            logger.warning(
+                "Could not delete group verification message %s: %s", vr.group_message_id, exc
+            )
 
     # Send welcome DM in bot chat
-    if pair.verification_welcome_dm:
+    if config.verification_welcome_dm:
         welcome_text = (
-            pair.verification_welcome_dm
+            config.verification_welcome_dm
             .replace("{имя}", vr.user_name)
-            .replace("{группа}", pair.group_name or pair.group_id)
+            .replace("{группа}", config.group_name or config.group_id)
         )
     else:
-        welcome_text = f"✅ Верификация пройдена! Добро пожаловать в *{pair.group_name or 'группу'}*."
+        welcome_text = (
+            f"✅ Верификация пройдена! Добро пожаловать в *{config.group_name or 'группу'}*."
+        )
 
     # Attach "Return to group" button if the group has a public link
     return_button = None
-    if pair.group_link:
+    if config.group_link:
         return_button = {
             "type": "inline_keyboard",
             "payload": {
                 "buttons": [[{
                     "type": "link",
                     "text": "💬 Вернуться в группу",
-                    "url": pair.group_link,
+                    "url": config.group_link,
                 }]]
             },
         }

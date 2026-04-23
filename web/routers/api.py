@@ -23,6 +23,7 @@ from db.models import (
     ScheduledPost,
     Subscription,
     User,
+    WelcomeConfig,
 )
 from shared.config import get_settings
 from web.auth import create_access_token, verify_password
@@ -259,6 +260,39 @@ async def get_bot_chats(bot_id: int, current_user: CurrentUser, session: DBSessi
     return {"channels": channels, "groups": groups}
 
 
+@router.get("/bots/{bot_id}/groups")
+async def get_bot_groups(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
+    """Fetch only group chats where the bot is a member (used in welcome config add modal)."""
+    result = await session.execute(
+        select(Bot).where(Bot.id == bot_id, Bot.user_id == current_user.id)
+    )
+    bot = result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(404, "Bot not found")
+
+    try:
+        token = decrypt_token(bot.encrypted_token)
+    except ValueError:
+        raise HTTPException(500, "Token decryption failed")
+
+    async with MaxClient(token=token) as client:
+        try:
+            data = await client.get_chats()
+        except MaxAPIError as exc:
+            raise HTTPException(502, f"MAX API error: {exc}")
+
+    groups = [
+        {
+            "chat_id": str(chat["chat_id"]),
+            "title": chat.get("title", ""),
+            "link": chat.get("link") or "",
+        }
+        for chat in data.get("chats", [])
+        if chat.get("type") == "chat"
+    ]
+    return {"groups": groups}
+
+
 # ── Pairs ─────────────────────────────────────────────────────────────────────
 
 class PairCreate(BaseModel):
@@ -404,45 +438,153 @@ async def delete_pair(pair_id: int, current_user: CurrentUser, session: DBSessio
     await session.commit()
 
 
-# ── Welcome / verification-only groups ───────────────────────────────────────
+# ── Welcome configs (standalone verification) ─────────────────────────────────
 
-class WelcomeGroupCreate(BaseModel):
+class WelcomeConfigCreate(BaseModel):
+    bot_id: int
     group_id: str
     group_name: str
     group_link: str = ""
-    bot_id: int
 
 
-@router.post("/welcome/groups", status_code=201)
-async def create_welcome_group(
-    body: WelcomeGroupCreate,
+class WelcomeConfigUpdate(BaseModel):
+    verification_enabled: bool | None = None
+    verification_timeout_min: int | None = None
+    verification_message: str | None = None
+    verification_button_text: str | None = None
+    verification_kick: bool | None = None
+    verification_notify_success: bool | None = None
+    verification_welcome_dm: str | None = None
+
+
+@router.get("/welcome/configs")
+async def list_welcome_configs(current_user: CurrentUser, session: DBSession, _: RateLimit):
+    result = await session.execute(
+        select(WelcomeConfig)
+        .where(WelcomeConfig.user_id == current_user.id)
+        .order_by(WelcomeConfig.created_at.desc())
+    )
+    configs = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "bot_id": c.bot_id,
+            "group_id": c.group_id,
+            "group_name": c.group_name,
+            "group_link": c.group_link,
+            "verification_enabled": c.verification_enabled,
+            "verification_timeout_min": c.verification_timeout_min,
+            "verification_message": c.verification_message,
+            "verification_button_text": c.verification_button_text,
+            "verification_kick": c.verification_kick,
+            "verification_notify_success": c.verification_notify_success,
+            "verification_welcome_dm": c.verification_welcome_dm,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in configs
+    ]
+
+
+@router.post("/welcome/configs", status_code=201)
+async def create_welcome_config(
+    body: WelcomeConfigCreate,
     current_user: CurrentUser,
     session: DBSession,
     _: RateLimit,
 ):
-    """Create a verification-only group (no channel pair needed)."""
+    """Create a standalone verification config for a group."""
     bot_result = await session.execute(
         select(Bot).where(Bot.id == body.bot_id, Bot.user_id == current_user.id)
     )
     if not bot_result.scalar_one_or_none():
         raise HTTPException(404, "Bot not found")
 
-    pair = ChannelGroupPair(
+    # Check for duplicates
+    existing = await session.execute(
+        select(WelcomeConfig).where(
+            WelcomeConfig.bot_id == body.bot_id,
+            WelcomeConfig.group_id == body.group_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "A welcome config for this bot+group already exists")
+
+    config = WelcomeConfig(
         user_id=current_user.id,
         bot_id=body.bot_id,
-        channel_id="",          # verification-only: no channel
-        channel_name="",
-        channel_link="",
         group_id=body.group_id,
         group_name=body.group_name,
         group_link=body.group_link,
-        enabled=False,          # post duplication disabled
-        verification_enabled=True,
     )
-    session.add(pair)
+    session.add(config)
     await session.commit()
-    await session.refresh(pair)
-    return {"id": pair.id}
+    await session.refresh(config)
+    return {"id": config.id}
+
+
+@router.patch("/welcome/configs/{config_id}")
+async def update_welcome_config(
+    config_id: int,
+    body: WelcomeConfigUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    result = await session.execute(
+        select(WelcomeConfig).where(
+            WelcomeConfig.id == config_id,
+            WelcomeConfig.user_id == current_user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(404, "Welcome config not found")
+
+    if body.verification_enabled is not None:
+        config.verification_enabled = body.verification_enabled
+
+    if body.verification_timeout_min is not None:
+        if not 1 <= body.verification_timeout_min <= 1440:
+            raise HTTPException(400, "Timeout must be between 1 and 1440 minutes")
+        config.verification_timeout_min = body.verification_timeout_min
+
+    if body.verification_message is not None:
+        config.verification_message = body.verification_message or None
+
+    if body.verification_button_text is not None:
+        config.verification_button_text = body.verification_button_text or None
+
+    if body.verification_kick is not None:
+        config.verification_kick = body.verification_kick
+
+    if body.verification_notify_success is not None:
+        config.verification_notify_success = body.verification_notify_success
+
+    if body.verification_welcome_dm is not None:
+        config.verification_welcome_dm = body.verification_welcome_dm or None
+
+    await session.commit()
+    return {"ok": True}
+
+
+@router.delete("/welcome/configs/{config_id}", status_code=204)
+async def delete_welcome_config(
+    config_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    result = await session.execute(
+        select(WelcomeConfig).where(
+            WelcomeConfig.id == config_id,
+            WelcomeConfig.user_id == current_user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(404, "Welcome config not found")
+    await session.delete(config)
+    await session.commit()
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────────

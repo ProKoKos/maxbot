@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Bot, ChannelGroupPair, EventLog, PostStatus, ScheduledPost, User
+from db.models import Bot, ChannelGroupPair, EventLog, PostStatus, ScheduledPost, User, WelcomeConfig
 from db.session import get_async_session
 from shared.config import get_settings
 from web.auth import create_access_token, verify_password
@@ -549,12 +549,12 @@ _DEFAULT_WELCOME_DM = "✅ Верификация пройдена! Добро �
 async def welcome_page(request: Request, session: DBSession):
     user = await _require_user(request, session)
 
-    pairs_result = await session.execute(
-        select(ChannelGroupPair)
-        .where(ChannelGroupPair.user_id == user.id)
-        .order_by(ChannelGroupPair.created_at.desc())
+    configs_result = await session.execute(
+        select(WelcomeConfig)
+        .where(WelcomeConfig.user_id == user.id)
+        .order_by(WelcomeConfig.created_at.desc())
     )
-    pairs = pairs_result.scalars().all()
+    configs = configs_result.scalars().all()
 
     bots_result = await session.execute(
         select(Bot).where(Bot.user_id == user.id)
@@ -562,31 +562,28 @@ async def welcome_page(request: Request, session: DBSession):
     bots = bots_result.scalars().all()
     bot_map = {b.id: b for b in bots}
 
-    # Serialize pairs to dicts for JSON embedding in the template
-    pairs_data = [
+    # Serialize configs to dicts for JSON embedding in the template
+    configs_data = [
         {
-            "id": p.id,
-            "group_name": p.group_name or "",
-            "group_id": p.group_id,
-            "group_link": p.group_link or "",
-            "channel_name": p.channel_name or "",
-            "channel_id": p.channel_id,
-            "bot_id": p.bot_id,
+            "id": c.id,
+            "group_name": c.group_name or "",
+            "group_id": c.group_id,
+            "group_link": c.group_link or "",
+            "bot_id": c.bot_id,
             "bot_name": (
-                f"@{bot_map[p.bot_id].max_username or bot_map[p.bot_id].name}"
-                if p.bot_id and p.bot_id in bot_map
+                f"@{bot_map[c.bot_id].max_username or bot_map[c.bot_id].name}"
+                if c.bot_id and c.bot_id in bot_map
                 else ""
             ),
-            "enabled": p.enabled,
-            "verification_enabled": p.verification_enabled,
-            "verification_timeout_min": p.verification_timeout_min,
-            "verification_message": p.verification_message or "",
-            "verification_button_text": p.verification_button_text or "",
-            "verification_kick": p.verification_kick,
-            "verification_notify_success": p.verification_notify_success,
-            "verification_welcome_dm": p.verification_welcome_dm or "",
+            "verification_enabled": c.verification_enabled,
+            "verification_timeout_min": c.verification_timeout_min,
+            "verification_message": c.verification_message or "",
+            "verification_button_text": c.verification_button_text or "",
+            "verification_kick": c.verification_kick,
+            "verification_notify_success": c.verification_notify_success,
+            "verification_welcome_dm": c.verification_welcome_dm or "",
         }
-        for p in pairs
+        for c in configs
     ]
 
     bots_list = [
@@ -595,6 +592,7 @@ async def welcome_page(request: Request, session: DBSession):
             "name": f"@{b.max_username or b.name}",
         }
         for b in bots
+        if b.is_active
     ]
 
     return templates.TemplateResponse(
@@ -602,8 +600,7 @@ async def welcome_page(request: Request, session: DBSession):
         {
             "request": request,
             "user": user,
-            "pairs_data": pairs_data,
-            "bot_map": bot_map,
+            "configs_data": configs_data,
             "bots_list": bots_list,
             "active_page": "welcome",
             "default_verify_msg": _DEFAULT_VERIFY_MSG,

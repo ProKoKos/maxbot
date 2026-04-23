@@ -22,6 +22,7 @@ from bot.crypto import decrypt_token
 from db.models import (
     Base, Bot, ChannelGroupPair, EventLog, LogLevel, PostLink,
     PostStatus, ScheduledPost, VerificationRequest, VerificationStatus,
+    WelcomeConfig,
 )
 from db.session import AsyncSessionLocal, async_engine
 from shared.config import get_settings
@@ -169,7 +170,8 @@ async def kick_expired_verifications() -> None:
                 VerificationRequest.deadline <= now,
             )
             .options(
-                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot)
+                selectinload(VerificationRequest.welcome_config).selectinload(WelcomeConfig.bot),
+                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot),
             )
             .limit(50)
         )
@@ -186,22 +188,35 @@ async def kick_expired_verifications() -> None:
 
 async def _process_expired(vr: VerificationRequest) -> None:
     async with AsyncSessionLocal() as session:
-        # Reload with relationships
+        # Reload with both config relationship types
         result = await session.execute(
             select(VerificationRequest)
             .where(VerificationRequest.id == vr.id)
             .options(
-                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot)
+                selectinload(VerificationRequest.welcome_config).selectinload(WelcomeConfig.bot),
+                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot),
             )
         )
         vr = result.scalar_one_or_none()
         if not vr or vr.status != VerificationStatus.pending:
             return  # race condition — already handled
 
-        pair: ChannelGroupPair = vr.pair
-        bot: Bot | None = pair.bot if pair else None
+        # Resolve config (WelcomeConfig takes priority, fall back to pair)
+        if vr.welcome_config_id and vr.welcome_config:
+            config = vr.welcome_config
+        elif vr.pair_id and vr.pair:
+            config = vr.pair
+        else:
+            vr.status = VerificationStatus.expired
+            await session.commit()
+            return
 
-        if not pair or not pair.enabled:
+        bot: Bot | None = config.bot
+        user_id = config.user_id
+
+        # Check if config is still active
+        is_pair = isinstance(config, ChannelGroupPair)
+        if is_pair and not config.enabled:
             vr.status = VerificationStatus.expired
             await session.commit()
             return
@@ -209,8 +224,8 @@ async def _process_expired(vr: VerificationRequest) -> None:
         if not bot or not bot.is_active:
             vr.status = VerificationStatus.expired
             session.add(EventLog(
-                user_id=pair.user_id, bot_id=None, level=LogLevel.warning,
-                message=f"Cannot kick {vr.user_name}: bot is inactive (pair {pair.id})",
+                user_id=user_id, bot_id=None, level=LogLevel.warning,
+                message=f"Cannot kick {vr.user_name}: bot is inactive (config {config.id})",
             ))
             await session.commit()
             return
@@ -226,17 +241,17 @@ async def _process_expired(vr: VerificationRequest) -> None:
 
         async with MaxClient(token=token) as client:
             # 1. Kick the user if configured
-            if pair.verification_kick:
+            if config.verification_kick:
                 try:
-                    await client.kick_member(chat_id=pair.group_id, user_id=vr.max_user_id)
+                    await client.kick_member(chat_id=config.group_id, user_id=vr.max_user_id)
                     logger.info(
                         "Kicked %s (%s) from group %s (verification timeout)",
-                        vr.user_name, vr.max_user_id, pair.group_id,
+                        vr.user_name, vr.max_user_id, config.group_id,
                     )
                 except MaxAPIError as exc:
                     logger.warning(
                         "Could not kick %s from group %s: %s",
-                        vr.max_user_id, pair.group_id, exc,
+                        vr.max_user_id, config.group_id, exc,
                     )
 
             # 2. Delete group verification message to keep the chat clean
@@ -250,12 +265,12 @@ async def _process_expired(vr: VerificationRequest) -> None:
                     )
 
         session.add(EventLog(
-            user_id=pair.user_id,
+            user_id=user_id,
             bot_id=bot.id,
             level=LogLevel.info,
             message=(
                 f"Verification expired: {vr.user_name} ({vr.max_user_id}) "
-                f"kicked from group {pair.group_id} (pair {pair.id})"
+                f"kicked from group {config.group_id} (config {config.id})"
             ),
         ))
         await session.commit()

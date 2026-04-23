@@ -161,7 +161,9 @@ class ChannelGroupPair(Base):
     post_links: Mapped[list["PostLink"]] = relationship(back_populates="pair")
     scheduled_posts: Mapped[list["ScheduledPost"]] = relationship(back_populates="pair")
     verification_requests: Mapped[list["VerificationRequest"]] = relationship(
-        back_populates="pair", cascade="all, delete-orphan"
+        back_populates="pair",
+        cascade="all, delete-orphan",
+        foreign_keys="[VerificationRequest.pair_id]",
     )
 
     __table_args__ = (
@@ -205,6 +207,52 @@ class PollingMarker(Base):
     )
 
     bot: Mapped["Bot"] = relationship(back_populates="polling_marker")
+
+
+# ─── Welcome / Verification configs ───────────────────────────────────────────
+
+class WelcomeConfig(Base):
+    """
+    Standalone verification (captcha-gate) config for a group.
+    Independent of channel-group pairs — can be used for any group
+    without a paired channel.
+    """
+    __tablename__ = "welcome_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    group_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    group_link: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+
+    # ── Verification settings ────────────────────────────────────────────────
+    verification_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    verification_timeout_min: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    # None → use built-in default template
+    verification_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification_button_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    verification_kick: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    verification_notify_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # None → use built-in default DM
+    verification_welcome_dm: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    bot: Mapped["Bot"] = relationship()
+    verification_requests: Mapped[list["VerificationRequest"]] = relationship(
+        back_populates="welcome_config",
+        cascade="all, delete-orphan",
+        foreign_keys="[VerificationRequest.welcome_config_id]",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "group_id", name="uq_welcome_config_bot_group"),
+        Index("ix_welcome_config_bot_group", "bot_id", "group_id"),
+    )
 
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -270,15 +318,20 @@ class VerificationRequest(Base):
     __tablename__ = "verification_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pair_id: Mapped[int] = mapped_column(
-        ForeignKey("channel_group_pairs.id", ondelete="CASCADE"), nullable=False
+    # Legacy FK — used for pair-based verification (channel+group pairs)
+    pair_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("channel_group_pairs.id", ondelete="CASCADE"), nullable=True
+    )
+    # New FK — used for standalone WelcomeConfig-based verification
+    welcome_config_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("welcome_configs.id", ondelete="CASCADE"), nullable=True
     )
     # Max user_id of the person being verified
     max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     user_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     # Secret token embedded in the deep-link payload
     token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    # Message sent in the group chat (to edit on success/failure)
+    # Message sent in the group chat (to delete on success/failure)
     group_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[VerificationStatus] = mapped_column(
@@ -288,7 +341,14 @@ class VerificationRequest(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    pair: Mapped["ChannelGroupPair"] = relationship(back_populates="verification_requests")
+    pair: Mapped[Optional["ChannelGroupPair"]] = relationship(
+        back_populates="verification_requests",
+        foreign_keys=[pair_id],
+    )
+    welcome_config: Mapped[Optional["WelcomeConfig"]] = relationship(
+        back_populates="verification_requests",
+        foreign_keys=[welcome_config_id],
+    )
 
     __table_args__ = (
         Index("ix_verification_token", "token"),

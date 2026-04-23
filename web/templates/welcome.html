@@ -18,17 +18,21 @@
     </svg>
     Добавить группу
   </button>
+  {% else %}
+  <a href="/bots"
+     class="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-medium rounded-lg transition-colors">
+    + Сначала добавьте бота
+  </a>
   {% endif %}
 </div>
 
-{% if not pairs_data %}
+{% if not configs_data %}
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
   <div class="text-5xl mb-4">📋</div>
-  <h2 class="text-lg font-semibold text-gray-700 mb-2">Нет настроенных пар</h2>
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Нет настроенных групп</h2>
   <p class="text-sm text-gray-500 max-w-sm mx-auto">
-    Сначала
-    <a href="/pairs" class="text-indigo-600 hover:underline">создайте пару канал→группа</a>
-    с привязанным ботом, чтобы настроить верификацию участников.
+    Нажмите <strong>«Добавить группу»</strong>, выберите бота и группу, где он является
+    администратором — верификация настраивается независимо от пар канал→группа.
   </p>
 </div>
 {% else %}
@@ -48,43 +52,43 @@
   </div>
 </div>
 
-<!-- Pairs table -->
+<!-- Configs table -->
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
   <table class="w-full text-sm">
     <thead>
       <tr class="border-b border-gray-100 bg-gray-50 text-left">
         <th class="px-4 py-3 font-medium text-gray-600">Группа</th>
-        <th class="px-4 py-3 font-medium text-gray-600">Канал</th>
         <th class="px-4 py-3 font-medium text-gray-600">Бот</th>
         <th class="px-4 py-3 font-medium text-gray-600">Верификация</th>
         <th class="px-4 py-3"></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-50">
-      {% for pair in pairs_data %}
+      {% for cfg in configs_data %}
       <tr class="hover:bg-gray-50/50 transition-colors">
         <td class="px-4 py-3">
-          <div class="font-medium text-gray-800">{{ pair.group_name or pair.group_id }}</div>
-          {% if pair.group_link %}
-          <a href="{{ pair.group_link }}" target="_blank"
-             class="text-xs text-indigo-500 hover:underline">{{ pair.group_link }}</a>
+          <div class="font-medium text-gray-800">{{ cfg.group_name or cfg.group_id }}</div>
+          {% if cfg.group_link %}
+          <a href="{{ cfg.group_link }}" target="_blank"
+             class="text-xs text-indigo-500 hover:underline truncate block max-w-xs">{{ cfg.group_link }}</a>
+          {% else %}
+          <span class="text-xs text-gray-400">{{ cfg.group_id }}</span>
           {% endif %}
         </td>
-        <td class="px-4 py-3 text-gray-600">{{ pair.channel_name or pair.channel_id }}</td>
         <td class="px-4 py-3">
-          {% if pair.bot_name %}
-            <span class="text-gray-700">{{ pair.bot_name }}</span>
+          {% if cfg.bot_name %}
+            <span class="text-gray-700">{{ cfg.bot_name }}</span>
           {% else %}
             <span class="text-red-400 text-xs">⚠ Нет бота</span>
           {% endif %}
         </td>
         <td class="px-4 py-3">
-          {% if pair.verification_enabled %}
+          {% if cfg.verification_enabled %}
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
               <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
               Включена
             </span>
-            <div class="text-xs text-gray-400 mt-0.5">⏰ {{ pair.verification_timeout_min }} мин</div>
+            <div class="text-xs text-gray-400 mt-0.5">⏰ {{ cfg.verification_timeout_min }} мин</div>
           {% else %}
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
               Выключена
@@ -93,15 +97,11 @@
         </td>
         <td class="px-4 py-3 text-right">
           <div class="inline-flex items-center gap-2">
-            {% if not pair.bot_id %}
-              <span class="text-xs text-gray-400 italic">Нет бота</span>
-            {% else %}
-              <button onclick="openSettings({{ loop.index0 }})"
-                      class="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
-                Настроить
-              </button>
-            {% endif %}
-            <button onclick="deleteGroup({{ pair.id }}, '{{ pair.group_name or pair.group_id }}')"
+            <button onclick="openSettings({{ loop.index0 }})"
+                    class="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+              Настроить
+            </button>
+            <button onclick="deleteConfig({{ cfg.id }}, '{{ cfg.group_name or cfg.group_id }}')"
                     class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-red-50 text-red-500 hover:text-red-600 border border-red-200 hover:border-red-300 rounded-lg transition-colors">
               Удалить
             </button>
@@ -114,7 +114,7 @@
 </div>
 {% endif %}
 
-<!-- ── Add Group Modal ─────────────────────────────────────────────────────── -->
+<!-- ── Add Group Modal (2-step: bot → group) ───────────────────────────────── -->
 <div id="add-group-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
   <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" onclick="closeAddGroup()"></div>
   <div class="relative bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-md">
@@ -127,36 +127,62 @@
       </button>
     </div>
     <form class="px-6 py-5 space-y-4" onsubmit="saveNewGroup(event)">
+
+      <!-- Step 1: Bot selector -->
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">ID группы <span class="text-red-500">*</span></label>
-        <input type="text" id="add-group-id" required placeholder="-1001234567890"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-gray-400 mt-1">Числовой ID чата (начинается с -100…)</p>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">Название группы <span class="text-red-500">*</span></label>
-        <input type="text" id="add-group-name" required placeholder="Моя группа"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">Ссылка на группу</label>
-        <input type="text" id="add-group-link" placeholder="https://max.ru/join/..."
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-gray-400 mt-1">Используется в кнопке «Вернуться в группу»</p>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">Бот <span class="text-red-500">*</span></label>
-        <select id="add-group-bot"
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+          Бот <span class="text-red-500">*</span>
+        </label>
+        <select id="add-bot-select" required
+                onchange="onBotSelected()"
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+          <option value="">— выберите бота —</option>
           {% for bot in bots_list %}
           <option value="{{ bot.id }}">{{ bot.name }}</option>
           {% endfor %}
         </select>
         <p class="text-xs text-gray-400 mt-1">Бот должен быть администратором группы</p>
       </div>
+
+      <!-- Step 2: Group selector (shown after bot is selected) -->
+      <div id="add-group-step" class="hidden space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">
+            Группа <span class="text-red-500">*</span>
+          </label>
+          <!-- Loading state -->
+          <div id="groups-loading" class="hidden flex items-center gap-2 py-2 text-sm text-gray-500">
+            <svg class="animate-spin w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            Загрузка групп…
+          </div>
+          <!-- Error state -->
+          <div id="groups-error" class="hidden text-sm text-red-500 py-1"></div>
+          <!-- Group dropdown -->
+          <select id="add-group-select"
+                  onchange="onGroupSelected()"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+            <option value="">— выберите группу —</option>
+          </select>
+          <p class="text-xs text-gray-400 mt-1">
+            Список групп, в которых бот является участником
+          </p>
+        </div>
+
+        <!-- Group link (auto-filled, editable) -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Ссылка на группу</label>
+          <input type="text" id="add-group-link" placeholder="https://max.ru/join/…"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <p class="text-xs text-gray-400 mt-1">Используется в кнопке «Вернуться в группу»</p>
+        </div>
+      </div>
+
       <div class="flex items-center gap-3 pt-2 border-t border-gray-100">
-        <button type="submit"
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+        <button type="submit" id="add-submit-btn" disabled
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
           Добавить
         </button>
         <button type="button" onclick="closeAddGroup()"
@@ -191,7 +217,7 @@
 
     <!-- Form -->
     <form id="settings-form" class="px-6 py-5 space-y-5" onsubmit="saveSettings(event)">
-      <input type="hidden" id="pair-id">
+      <input type="hidden" id="config-id">
 
       <!-- Enable toggle row -->
       <div class="flex items-center justify-between py-1">
@@ -218,7 +244,6 @@
             Переменные: <code class="bg-gray-100 px-1 rounded">{имя}</code>,
             <code class="bg-gray-100 px-1 rounded">{группа}</code>,
             <code class="bg-gray-100 px-1 rounded">{минут}</code>
-            — пустое поле = встроенный шаблон
           </p>
         </div>
 
@@ -261,10 +286,10 @@
                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
           <div>
             <label for="field-notify" class="text-sm font-medium text-gray-700 cursor-pointer">
-              Обновлять сообщение в группе после верификации
+              Удалять сообщение в группе после верификации
             </label>
             <p class="text-xs text-gray-500 mt-0.5">
-              Бот изменит своё сообщение: «✅ Иван прошёл проверку»
+              Бот удалит своё сообщение с кнопкой после подтверждения
             </p>
           </div>
         </div>
@@ -301,10 +326,10 @@
 </div>
 
 <script>
-// All pairs serialized from server
-const PAIRS = {{ pairs_data | tojson }};
+// All welcome configs serialized from server
+const CONFIGS = {{ configs_data | tojson }};
 
-// Default values shown when pair fields are not yet configured
+// Default values shown when fields are not yet configured
 const DEFAULTS = {
   message:   {{ default_verify_msg | tojson }},
   buttonText: {{ default_verify_btn | tojson }},
@@ -313,19 +338,21 @@ const DEFAULTS = {
 
 let currentEnabled = false;
 
-function openSettings(idx) {
-  const pair = PAIRS[idx];
-  document.getElementById('pair-id').value = pair.id;
-  document.getElementById('modal-title').textContent = 'Верификация: ' + (pair.group_name || pair.group_id);
-  document.getElementById('modal-subtitle').textContent = pair.bot_name ? 'Бот: ' + pair.bot_name : '';
+// ── Settings Modal ──────────────────────────────────────────────────────────
 
-  currentEnabled = !!pair.verification_enabled;
-  document.getElementById('field-message').value = pair.verification_message || DEFAULTS.message;
-  document.getElementById('field-button-text').value = pair.verification_button_text || DEFAULTS.buttonText;
-  document.getElementById('field-timeout').value = pair.verification_timeout_min || 10;
-  document.getElementById('field-kick').checked = pair.verification_kick !== false;
-  document.getElementById('field-notify').checked = pair.verification_notify_success !== false;
-  document.getElementById('field-welcome-dm').value = pair.verification_welcome_dm || DEFAULTS.welcomeDm;
+function openSettings(idx) {
+  const cfg = CONFIGS[idx];
+  document.getElementById('config-id').value = cfg.id;
+  document.getElementById('modal-title').textContent = 'Верификация: ' + (cfg.group_name || cfg.group_id);
+  document.getElementById('modal-subtitle').textContent = cfg.bot_name ? 'Бот: ' + cfg.bot_name : '';
+
+  currentEnabled = !!cfg.verification_enabled;
+  document.getElementById('field-message').value = cfg.verification_message || DEFAULTS.message;
+  document.getElementById('field-button-text').value = cfg.verification_button_text || DEFAULTS.buttonText;
+  document.getElementById('field-timeout').value = cfg.verification_timeout_min || 10;
+  document.getElementById('field-kick').checked = cfg.verification_kick !== false;
+  document.getElementById('field-notify').checked = cfg.verification_notify_success !== false;
+  document.getElementById('field-welcome-dm').value = cfg.verification_welcome_dm || DEFAULTS.welcomeDm;
 
   _updateToggle();
   document.getElementById('save-status').textContent = '';
@@ -359,7 +386,7 @@ function _updateToggle() {
 
 async function saveSettings(e) {
   e.preventDefault();
-  const pairId = document.getElementById('pair-id').value;
+  const configId = document.getElementById('config-id').value;
   const statusEl = document.getElementById('save-status');
   statusEl.textContent = 'Сохранение…';
   statusEl.className = 'text-sm ml-auto text-gray-500';
@@ -375,7 +402,7 @@ async function saveSettings(e) {
   };
 
   try {
-    const resp = await fetch('/api/pairs/' + pairId + '/verification', {
+    const resp = await fetch('/api/welcome/configs/' + configId, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
@@ -393,21 +420,88 @@ async function saveSettings(e) {
   }
 }
 
-// ── Add Group ──────────────────────────────────────────────────────────────
+// ── Add Group Modal ──────────────────────────────────────────────────────────
 
 function openAddGroup() {
-  document.getElementById('add-group-id').value = '';
-  document.getElementById('add-group-name').value = '';
+  document.getElementById('add-bot-select').value = '';
+  document.getElementById('add-group-step').classList.add('hidden');
+  document.getElementById('add-group-select').innerHTML = '<option value="">— выберите группу —</option>';
   document.getElementById('add-group-link').value = '';
   document.getElementById('add-group-status').textContent = '';
+  document.getElementById('add-submit-btn').disabled = true;
+  document.getElementById('groups-error').classList.add('hidden');
+  document.getElementById('groups-loading').classList.add('hidden');
   document.getElementById('add-group-modal').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  setTimeout(() => document.getElementById('add-group-id').focus(), 50);
+  setTimeout(() => document.getElementById('add-bot-select').focus(), 50);
 }
 
 function closeAddGroup() {
   document.getElementById('add-group-modal').classList.add('hidden');
   document.body.style.overflow = '';
+}
+
+async function onBotSelected() {
+  const botId = document.getElementById('add-bot-select').value;
+  const step = document.getElementById('add-group-step');
+  const loading = document.getElementById('groups-loading');
+  const errEl = document.getElementById('groups-error');
+  const select = document.getElementById('add-group-select');
+  const submitBtn = document.getElementById('add-submit-btn');
+
+  if (!botId) {
+    step.classList.add('hidden');
+    submitBtn.disabled = true;
+    return;
+  }
+
+  step.classList.remove('hidden');
+  loading.classList.remove('hidden');
+  errEl.classList.add('hidden');
+  select.innerHTML = '<option value="">— загрузка… —</option>';
+  submitBtn.disabled = true;
+
+  try {
+    const resp = await fetch(`/api/bots/${botId}/groups`);
+    if (!resp.ok) throw new Error('Ошибка при загрузке групп');
+    const data = await resp.json();
+
+    select.innerHTML = '<option value="">— выберите группу —</option>';
+    if (!data.groups || data.groups.length === 0) {
+      select.innerHTML = '<option value="" disabled>Нет доступных групп</option>';
+      errEl.textContent = 'Бот не состоит ни в одной группе. Добавьте его как администратора.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    for (const g of data.groups) {
+      const opt = document.createElement('option');
+      opt.value = g.chat_id;
+      opt.dataset.title = g.title || g.chat_id;
+      opt.dataset.link = g.link || '';
+      opt.textContent = g.title || g.chat_id;
+      select.appendChild(opt);
+    }
+  } catch (err) {
+    errEl.textContent = '❌ ' + err.message;
+    errEl.classList.remove('hidden');
+    select.innerHTML = '<option value="">— ошибка загрузки —</option>';
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+function onGroupSelected() {
+  const select = document.getElementById('add-group-select');
+  const submitBtn = document.getElementById('add-submit-btn');
+  const opt = select.selectedOptions[0];
+
+  if (opt && opt.value) {
+    document.getElementById('add-group-link').value = opt.dataset.link || '';
+    submitBtn.disabled = false;
+  } else {
+    submitBtn.disabled = true;
+  }
 }
 
 async function saveNewGroup(e) {
@@ -416,15 +510,25 @@ async function saveNewGroup(e) {
   statusEl.textContent = 'Сохранение…';
   statusEl.className = 'text-sm ml-auto text-gray-500';
 
+  const botId = parseInt(document.getElementById('add-bot-select').value);
+  const select = document.getElementById('add-group-select');
+  const opt = select.selectedOptions[0];
+
+  if (!opt || !opt.value) {
+    statusEl.textContent = '❌ Выберите группу';
+    statusEl.className = 'text-sm ml-auto text-red-600';
+    return;
+  }
+
   const body = {
-    group_id:   document.getElementById('add-group-id').value.trim(),
-    group_name: document.getElementById('add-group-name').value.trim(),
+    bot_id:     botId,
+    group_id:   opt.value,
+    group_name: opt.dataset.title || opt.value,
     group_link: document.getElementById('add-group-link').value.trim(),
-    bot_id:     parseInt(document.getElementById('add-group-bot').value),
   };
 
   try {
-    const resp = await fetch('/api/welcome/groups', {
+    const resp = await fetch('/api/welcome/configs', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
@@ -442,12 +546,12 @@ async function saveNewGroup(e) {
   }
 }
 
-// ── Delete Group ───────────────────────────────────────────────────────────
+// ── Delete Config ────────────────────────────────────────────────────────────
 
-async function deleteGroup(pairId, groupName) {
-  if (!confirm(`Удалить верификацию для группы «${groupName}»?\n\nЭто действие необратимо.`)) return;
+async function deleteConfig(configId, groupName) {
+  if (!confirm(`Удалить верификацию для группы «${groupName}»?\n\nЭто удалит только настройки верификации, не пару канал→группа.`)) return;
   try {
-    const resp = await fetch('/api/pairs/' + pairId, { method: 'DELETE' });
+    const resp = await fetch('/api/welcome/configs/' + configId, { method: 'DELETE' });
     if (!resp.ok && resp.status !== 204) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || 'Ошибка сервера');

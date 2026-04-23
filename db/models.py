@@ -127,6 +127,7 @@ class ChannelGroupPair(Base):
     )
     channel_id: Mapped[str] = mapped_column(String(64), nullable=False)
     channel_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    channel_link: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     group_id: Mapped[str] = mapped_column(String(64), nullable=False)
     group_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     group_link: Mapped[str] = mapped_column(String(512), nullable=False, default="")

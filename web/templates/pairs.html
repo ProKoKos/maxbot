@@ -62,7 +62,7 @@
           </span>
         </td>
         <td class="px-5 py-3 text-right space-x-2">
-          <button onclick='openEditModal({{ p.id }}, {{ p.bot_id or "null" }}, "{{ p.channel_id }}", "{{ p.channel_name }}", "{{ p.group_id }}", "{{ p.group_name }}", "{{ p.group_link }}")'
+          <button onclick='openEditModal({{ p.id }}, {{ p.bot_id or "null" }}, "{{ p.channel_id }}", "{{ p.channel_name }}", "{{ p.channel_link }}", "{{ p.group_id }}", "{{ p.group_name }}", "{{ p.group_link }}")'
                   class="text-xs px-2 py-1 rounded border border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 transition-colors">
             Изменить
           </button>
@@ -99,6 +99,7 @@
 
     <form id="pair-form" class="space-y-4">
       <input type="hidden" id="edit-pair-id" value="">
+      <input type="hidden" id="f-channel-link" value="">
 
       <!-- Bot selector -->
       <div>
@@ -182,7 +183,7 @@
     document.getElementById("pair-modal").classList.remove("hidden");
   }
 
-  function openEditModal(id, botId, channelId, channelName, groupId, groupName, groupLink) {
+  function openEditModal(id, botId, channelId, channelName, channelLink, groupId, groupName, groupLink) {
     document.getElementById("modal-title").textContent = "Редактировать пару";
     document.getElementById("edit-pair-id").value = id;
     resetForm();
@@ -193,7 +194,7 @@
 
     // Load chats for the selected bot, then pre-select channel/group
     if (botId) {
-      loadChats(botId, channelId, groupId, groupLink);
+      loadChats(botId, channelId, channelLink, groupId, groupLink);
     }
 
     document.getElementById("pair-modal").classList.remove("hidden");
@@ -214,11 +215,12 @@
     document.getElementById("channel-id-hint").textContent = "";
     document.getElementById("group-id-hint").textContent = "";
     document.getElementById("f-group-link").value = "";
+    document.getElementById("f-channel-link").value = "";
     chatsData = { channels: [], groups: [] };
   }
 
   // ── Load chats from API ────────────────────────────────────────────────────
-  async function loadChats(botId, preChannelId = null, preGroupId = null, preGroupLink = null) {
+  async function loadChats(botId, preChannelId = null, preChannelLink = null, preGroupId = null, preGroupLink = null) {
     document.getElementById("chats-loading").classList.remove("hidden");
     document.getElementById("chats-error").classList.add("hidden");
     document.getElementById("channel-block").classList.add("hidden");
@@ -269,6 +271,15 @@
     if (preGroupLink) {
       document.getElementById("f-group-link").value = preGroupLink;
     }
+    // channel_link: prefer live data, fall back to stored value
+    if (preChannelId) {
+      const chan = chatsData.channels.find(c => c.chat_id === preChannelId);
+      if (chan?.link) {
+        document.getElementById("f-channel-link").value = chan.link;
+      } else if (preChannelLink) {
+        document.getElementById("f-channel-link").value = preChannelLink;
+      }
+    }
   }
 
   // ── Bot selector change ────────────────────────────────────────────────────
@@ -289,6 +300,9 @@
 
   function updateChannelHint(chatId) {
     document.getElementById("channel-id-hint").textContent = chatId ? `ID: ${chatId}` : "";
+    // Auto-fill channel_link from chats data
+    const chan = chatsData.channels.find(c => c.chat_id === chatId);
+    document.getElementById("f-channel-link").value = chan?.link || "";
   }
 
   // ── Group selector change ──────────────────────────────────────────────────
@@ -335,6 +349,7 @@
     const channelName = channelSel.options[channelSel.selectedIndex]?.text || "";
     const groupName = groupSel.options[groupSel.selectedIndex]?.text || "";
     const groupLink = document.getElementById("f-group-link").value.trim();
+    const channelLink = document.getElementById("f-channel-link").value.trim();
 
     if (!botId || !channelId || !groupId) {
       showError("Выберите бота, канал и группу");
@@ -345,6 +360,7 @@
       bot_id: parseInt(botId),
       channel_id: channelId,
       channel_name: channelName,
+      channel_link: channelLink,
       group_id: groupId,
       group_name: groupName,
       group_link: groupLink,

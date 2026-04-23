@@ -46,8 +46,13 @@ def comment_button(group_link: str, group_message_id: str | None = None) -> dict
     }
 
 
-def discussion_header(channel_name: str, channel_post_id: str) -> str:
+def discussion_header(channel_name: str, channel_post_id: str, channel_link: str = "") -> str:
     """
     Text prefix prepended to duplicated posts in the discussion group.
+    If channel_link is provided, the channel name becomes a clickable link.
     """
-    return f"📢 *Пост из канала [{channel_name}](#{channel_post_id})*\n\n"
+    if channel_link:
+        name_part = f"[{channel_name}]({channel_link})"
+    else:
+        name_part = channel_name
+    return f"📢 *Пост из канала {name_part}*\n\n"

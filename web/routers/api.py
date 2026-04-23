@@ -265,6 +265,7 @@ class PairCreate(BaseModel):
     bot_id: int
     channel_id: str
     channel_name: str
+    channel_link: str = ""
     group_id: str
     group_name: str
     group_link: str
@@ -284,6 +285,7 @@ async def list_pairs(current_user: CurrentUser, session: DBSession, _: RateLimit
             "bot_id": p.bot_id,
             "channel_id": p.channel_id,
             "channel_name": p.channel_name,
+            "channel_link": p.channel_link,
             "group_id": p.group_id,
             "group_name": p.group_name,
             "group_link": p.group_link,
@@ -309,6 +311,7 @@ async def create_pair(body: PairCreate, current_user: CurrentUser, session: DBSe
         bot_id=body.bot_id,
         channel_id=body.channel_id,
         channel_name=body.channel_name,
+        channel_link=body.channel_link,
         group_id=body.group_id,
         group_name=body.group_name,
         group_link=body.group_link,
@@ -323,6 +326,7 @@ class PairUpdate(BaseModel):
     bot_id: int | None = None
     channel_id: str | None = None
     channel_name: str | None = None
+    channel_link: str | None = None
     group_id: str | None = None
     group_name: str | None = None
     group_link: str | None = None
@@ -354,6 +358,8 @@ async def update_pair(
         pair.channel_id = body.channel_id
     if body.channel_name is not None:
         pair.channel_name = body.channel_name
+    if body.channel_link is not None:
+        pair.channel_link = body.channel_link
     if body.group_id is not None:
         pair.group_id = body.group_id
     if body.group_name is not None:

@@ -87,7 +87,7 @@ async def _handle_message_created(
     )
 
     # ── Step 1: Duplicate post to discussion group ────────────────────────────
-    header = discussion_header(pair.channel_name or chat_id, message_id)
+    header = discussion_header(pair.channel_name or chat_id, message_id, pair.channel_link or "")
     group_text = header + (text or "")
     # Only forward media attachments (image/video/audio/file).
     # share tokens are context-specific — invalid in a different chat.

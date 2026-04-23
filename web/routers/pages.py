@@ -589,7 +589,7 @@ async def welcome_page(request: Request, session: DBSession):
     bots_list = [
         {
             "id": b.id,
-            "name": f"@{b.max_username or b.name}",
+            "name": b.name or f"@{b.max_username}",
         }
         for b in bots
         if b.is_active

@@ -30,8 +30,8 @@
       {% for post in posts %}
       {% set pair = pairs | selectattr("id", "equalto", post.pair_id) | first | default(None) %}
       <tr id="post-{{ post.id }}">
-        <td class="px-5 py-3 whitespace-nowrap text-gray-700 font-mono text-xs">
-          {{ post.scheduled_at.strftime("%d.%m.%Y %H:%M UTC") }}
+        <td class="px-5 py-3 whitespace-nowrap text-gray-700 font-mono text-xs"
+            data-utc="{{ post.scheduled_at.isoformat() }}">
         </td>
         <td class="px-5 py-3 text-gray-600 text-xs">
           {{ pair.channel_name if pair else post.pair_id }}
@@ -128,6 +128,15 @@
   // Показываем часовой пояс браузера
   const userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
   document.getElementById("tz-label").textContent = userTZ;
+
+  // Конвертируем UTC-время в таблице в локальное время браузера
+  document.querySelectorAll("td[data-utc]").forEach(td => {
+    const dt = new Date(td.dataset.utc);
+    td.textContent = dt.toLocaleString("ru-RU", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  });
 
   function openCreateModal() {
     document.getElementById("post-modal-title").textContent = "Новый отложенный пост";

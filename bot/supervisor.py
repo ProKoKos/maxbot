@@ -165,12 +165,11 @@ class BotSupervisor:
                 updates = data.get("updates", [])
                 new_marker = data.get("marker")
 
-                # TEMP DEBUG: log every non-empty response
-                if data.get("updates") is not None or len(data.keys()) > 1:
-                    logger.info(
-                        "Bot %d /updates response keys=%s updates_count=%d marker=%s",
-                        bot_id, list(data.keys()), len(updates), new_marker,
-                    )
+                # TEMP DEBUG: always log the response shape
+                logger.info(
+                    "Bot %d /updates response keys=%s updates_count=%d marker=%s",
+                    bot_id, list(data.keys()), len(updates), new_marker,
+                )
 
                 if updates:
                     for upd in updates:

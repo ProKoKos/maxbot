@@ -41,6 +41,13 @@ class PostStatus(str, enum.Enum):
     failed = "failed"
 
 
+class VerificationStatus(str, enum.Enum):
+    pending = "pending"
+    verified = "verified"
+    kicked = "kicked"
+    expired = "expired"
+
+
 # ─── Users & SaaS ─────────────────────────────────────────────────────────────
 
 class User(Base):
@@ -136,12 +143,26 @@ class ChannelGroupPair(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
+    # ── Verification (captcha-gate) ───────────────────────────────────────────
+    verification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_timeout_min: Mapped[int] = mapped_column(Integer, default=10)
+    # None → use built-in default template
+    verification_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verification_button_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    verification_kick: Mapped[bool] = mapped_column(Boolean, default=True)
+    verification_notify_success: Mapped[bool] = mapped_column(Boolean, default=True)
+    # None → don't send DM
+    verification_welcome_dm: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     user: Mapped["User"] = relationship(back_populates="pairs")
     bot: Mapped[Optional["Bot"]] = relationship(
         back_populates="pairs", foreign_keys=[bot_id]
     )
     post_links: Mapped[list["PostLink"]] = relationship(back_populates="pair")
     scheduled_posts: Mapped[list["ScheduledPost"]] = relationship(back_populates="pair")
+    verification_requests: Mapped[list["VerificationRequest"]] = relationship(
+        back_populates="pair", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_pair_bot_channel", "bot_id", "channel_id", "enabled"),
@@ -230,4 +251,46 @@ class ScheduledPost(Base):
 
     __table_args__ = (
         Index("ix_scheduled_status_at", "status", "scheduled_at"),
+    )
+
+
+# ─── Verification requests ────────────────────────────────────────────────────
+
+class VerificationRequest(Base):
+    """
+    Tracks a single captcha-gate challenge for a new group member.
+
+    Flow:
+      1. user joins group → bot creates VerificationRequest (status=pending)
+      2. bot posts a message with deep-link button to the group
+      3. user clicks → opens bot → /start with payload "verify_<token>"
+      4. bot marks status=verified, edits group message, optionally sends DM
+      5. scheduler: if deadline passed and status=pending → kick + status=kicked
+    """
+    __tablename__ = "verification_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pair_id: Mapped[int] = mapped_column(
+        ForeignKey("channel_group_pairs.id", ondelete="CASCADE"), nullable=False
+    )
+    # Max user_id of the person being verified
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # Secret token embedded in the deep-link payload
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Message sent in the group chat (to edit on success/failure)
+    group_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[VerificationStatus] = mapped_column(
+        Enum(VerificationStatus, native_enum=False), default=VerificationStatus.pending
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    pair: Mapped["ChannelGroupPair"] = relationship(back_populates="verification_requests")
+
+    __table_args__ = (
+        Index("ix_verification_token", "token"),
+        Index("ix_verification_status_deadline", "status", "deadline"),
     )

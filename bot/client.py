@@ -144,3 +144,19 @@ class MaxClient:
 
     async def get_chats(self) -> dict:
         return await self._request("GET", "/chats")
+
+    # ── Members ───────────────────────────────────────────────────────────────
+
+    async def kick_member(self, chat_id: str, user_id: str) -> dict:
+        """Remove (kick) a member from a group chat."""
+        return await self._request(
+            "DELETE", f"/chats/{chat_id}/members",
+            params={"user_id": user_id},
+        )
+
+    async def send_action(self, chat_id: str, action: str = "typing_on") -> None:
+        """Send a chat action (e.g. typing indicator). Errors are swallowed."""
+        try:
+            await self._request("POST", "/chats/actions", params={"chat_id": chat_id}, json={"action": action})
+        except MaxAPIError:
+            pass

@@ -19,7 +19,10 @@ from sqlalchemy.orm import selectinload
 from bot.buttons import comment_button, discussion_header
 from bot.client import MaxAPIError, MaxClient
 from bot.crypto import decrypt_token
-from db.models import Base, Bot, ChannelGroupPair, EventLog, LogLevel, PostLink, PostStatus, ScheduledPost
+from db.models import (
+    Base, Bot, ChannelGroupPair, EventLog, LogLevel, PostLink,
+    PostStatus, ScheduledPost, VerificationRequest, VerificationStatus,
+)
 from db.session import AsyncSessionLocal, async_engine
 from shared.config import get_settings
 
@@ -148,6 +151,121 @@ async def _publish_one(post: ScheduledPost) -> None:
         await session.commit()
 
 
+_DEFAULT_KICK_MSG = "❌ **{имя}** не прошёл(а) проверку вовремя и был(а) исключён(а) из группы."
+
+
+async def kick_expired_verifications() -> None:
+    """
+    Every 60 s: find pending verification requests past their deadline,
+    kick the user from the group, and mark the request as 'kicked'.
+    """
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(VerificationRequest)
+            .where(
+                VerificationRequest.status == VerificationStatus.pending,
+                VerificationRequest.deadline <= now,
+            )
+            .options(
+                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot)
+            )
+            .limit(50)
+        )
+        expired: list[VerificationRequest] = result.scalars().all()
+
+    if not expired:
+        return
+
+    logger.info("Processing %d expired verification request(s)", len(expired))
+
+    for vr in expired:
+        await _process_expired(vr)
+
+
+async def _process_expired(vr: VerificationRequest) -> None:
+    async with AsyncSessionLocal() as session:
+        # Reload with relationships
+        result = await session.execute(
+            select(VerificationRequest)
+            .where(VerificationRequest.id == vr.id)
+            .options(
+                selectinload(VerificationRequest.pair).selectinload(ChannelGroupPair.bot)
+            )
+        )
+        vr = result.scalar_one_or_none()
+        if not vr or vr.status != VerificationStatus.pending:
+            return  # race condition — already handled
+
+        pair: ChannelGroupPair = vr.pair
+        bot: Bot | None = pair.bot if pair else None
+
+        if not pair or not pair.enabled:
+            vr.status = VerificationStatus.expired
+            await session.commit()
+            return
+
+        if not bot or not bot.is_active:
+            vr.status = VerificationStatus.expired
+            session.add(EventLog(
+                user_id=pair.user_id, bot_id=None, level=LogLevel.warning,
+                message=f"Cannot kick {vr.user_name}: bot is inactive (pair {pair.id})",
+            ))
+            await session.commit()
+            return
+
+        try:
+            token = decrypt_token(bot.encrypted_token)
+        except ValueError:
+            vr.status = VerificationStatus.expired
+            await session.commit()
+            return
+
+        vr.status = VerificationStatus.kicked
+
+        async with MaxClient(token=token) as client:
+            # 1. Kick the user if configured
+            if pair.verification_kick:
+                try:
+                    await client.kick_member(chat_id=pair.group_id, user_id=vr.max_user_id)
+                    logger.info(
+                        "Kicked %s (%s) from group %s (verification timeout)",
+                        vr.user_name, vr.max_user_id, pair.group_id,
+                    )
+                except MaxAPIError as exc:
+                    logger.warning(
+                        "Could not kick %s from group %s: %s",
+                        vr.max_user_id, pair.group_id, exc,
+                    )
+
+            # 2. Edit group verification message to show failure
+            if vr.group_message_id:
+                kick_text = _DEFAULT_KICK_MSG.replace("{имя}", vr.user_name)
+                try:
+                    await client.edit_message(
+                        message_id=vr.group_message_id,
+                        text=kick_text,
+                        attachments=[],
+                    )
+                except MaxAPIError as exc:
+                    logger.warning(
+                        "Could not edit verification message %s: %s",
+                        vr.group_message_id, exc,
+                    )
+
+        session.add(EventLog(
+            user_id=pair.user_id,
+            bot_id=bot.id,
+            level=LogLevel.info,
+            message=(
+                f"Verification expired: {vr.user_name} ({vr.max_user_id}) "
+                f"kicked from group {pair.group_id} (pair {pair.id})"
+            ),
+        ))
+        await session.commit()
+
+
 async def main() -> None:
     await _ensure_schema()
 
@@ -160,8 +278,16 @@ async def main() -> None:
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        kick_expired_verifications,
+        trigger="interval",
+        seconds=60,
+        id="kick_expired_verifications",
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
-    logger.info("Scheduler started — checking for posts every 30 seconds")
+    logger.info("Scheduler started — posts every 30 s, verification kicks every 60 s")
 
     try:
         while True:

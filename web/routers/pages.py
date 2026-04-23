@@ -537,69 +537,56 @@ async def ai_gen_page(request: Request, session: DBSession):
 @router.get("/welcome", response_class=HTMLResponse)
 async def welcome_page(request: Request, session: DBSession):
     user = await _require_user(request, session)
-    return _coming_soon(request, user, "welcome",
-        title="Приветствия",
-        icon="👋",
-        description=(
-            "Автоматически встречайте новых участников группы: приветственный пост в чате, "
-            "кнопка перехода к боту и онбординг для тех, кто написал боту первым."
-        ),
-        features=[
-            {
-                "icon": "📋",
-                "title": "Приветственный пост в группе",
-                "description": (
-                    "Когда новый участник вступает в группу, бот публикует в общем чате "
-                    "сообщение: «Добро пожаловать, @username!» с кнопкой «Написать боту». "
-                    "Пост автоматически удаляется через заданное время, чтобы не засорять ленту."
-                ),
-            },
-            {
-                "icon": "🔘",
-                "title": "Кнопка перехода в личку",
-                "description": (
-                    "Приветственный пост содержит inline-кнопку с deep-link на бота. "
-                    "Новичок нажимает — попадает в личный диалог и нажимает /start. "
-                    "После этого бот может писать ему первым в рамках этого диалога."
-                ),
-            },
-            {
-                "icon": "📜",
-                "title": "Онбординг после /start",
-                "description": (
-                    "Как только пользователь написал боту, запускается приветственная цепочка: "
-                    "правила сообщества, ссылки на важные посты, кнопка «Ознакомился». "
-                    "Используются переменные {{имя}}, {{группа}}, {{дата вступления}}."
-                ),
-            },
-            {
-                "icon": "🎁",
-                "title": "Бонус за вступление",
-                "description": (
-                    "После нажатия /start бот выдаёт промокод, ссылку на закрытый контент "
-                    "или стартовый бонус в системе геймификации. "
-                    "Мотивирует новичков сразу перейти в личку и начать взаимодействие."
-                ),
-            },
-            {
-                "icon": "⏰",
-                "title": "Серия онбординг-сообщений",
-                "description": (
-                    "Для пользователей, написавших боту, настраивается цепочка из 3–5 сообщений "
-                    "в течение первых дней: что почитать, как участвовать, анонсы событий. "
-                    "Мягкое погружение в жизнь сообщества без спама в общем чате."
-                ),
-            },
-            {
-                "icon": "📊",
-                "title": "Статистика новых участников",
-                "description": (
-                    "Сколько человек вступило за день/неделю/месяц, какой процент "
-                    "перешёл в личку с ботом, сколько прошли онбординг до конца. "
-                    "Отслеживайте динамику роста и конверсию по источникам."
-                ),
-            },
-        ],
+
+    pairs_result = await session.execute(
+        select(ChannelGroupPair)
+        .where(ChannelGroupPair.user_id == user.id)
+        .order_by(ChannelGroupPair.created_at.desc())
+    )
+    pairs = pairs_result.scalars().all()
+
+    bots_result = await session.execute(
+        select(Bot).where(Bot.user_id == user.id)
+    )
+    bots = bots_result.scalars().all()
+    bot_map = {b.id: b for b in bots}
+
+    # Serialize pairs to dicts for JSON embedding in the template
+    pairs_data = [
+        {
+            "id": p.id,
+            "group_name": p.group_name or "",
+            "group_id": p.group_id,
+            "group_link": p.group_link or "",
+            "channel_name": p.channel_name or "",
+            "channel_id": p.channel_id,
+            "bot_id": p.bot_id,
+            "bot_name": (
+                f"@{bot_map[p.bot_id].max_username or bot_map[p.bot_id].name}"
+                if p.bot_id and p.bot_id in bot_map
+                else ""
+            ),
+            "enabled": p.enabled,
+            "verification_enabled": p.verification_enabled,
+            "verification_timeout_min": p.verification_timeout_min,
+            "verification_message": p.verification_message or "",
+            "verification_button_text": p.verification_button_text or "",
+            "verification_kick": p.verification_kick,
+            "verification_notify_success": p.verification_notify_success,
+            "verification_welcome_dm": p.verification_welcome_dm or "",
+        }
+        for p in pairs
+    ]
+
+    return templates.TemplateResponse(
+        "welcome.html",
+        {
+            "request": request,
+            "user": user,
+            "pairs_data": pairs_data,
+            "bot_map": bot_map,
+            "active_page": "welcome",
+        },
     )
 
 

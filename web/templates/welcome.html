@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}Приветствия{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-gray-900">👋 Приветствия и верификация</h1>
+  <p class="text-sm text-gray-500 mt-1">
+    Captcha-gate для новых участников групп — новичок должен подтвердить через бота,
+    что он не бот, иначе будет исключён по истечении времени.
+  </p>
+</div>
+
+{% if not pairs_data %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+  <div class="text-5xl mb-4">📋</div>
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Нет настроенных пар</h2>
+  <p class="text-sm text-gray-500 max-w-sm mx-auto">
+    Сначала
+    <a href="/pairs" class="text-indigo-600 hover:underline">создайте пару канал→группа</a>
+    с привязанным ботом, чтобы настроить верификацию участников.
+  </p>
+</div>
+{% else %}
+
+<!-- How it works -->
+<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-6 text-sm text-indigo-800 flex gap-3">
+  <span class="text-xl shrink-0">ℹ️</span>
+  <div>
+    <strong>Как работает:</strong>
+    когда новый участник вступает в группу, бот публикует сообщение с кнопкой-ссылкой на бота.
+    Участник нажимает → открывает бота → нажимает /start → проходит верификацию.
+    Если не успевает до дедлайна — исключается из группы автоматически.
+    <br>
+    <span class="text-indigo-600 font-medium">
+      Бот должен быть администратором группы с правом удалять участников.
+    </span>
+  </div>
+</div>
+
+<!-- Pairs table -->
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-gray-100 bg-gray-50 text-left">
+        <th class="px-4 py-3 font-medium text-gray-600">Группа</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Канал</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Бот</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Верификация</th>
+        <th class="px-4 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for pair in pairs_data %}
+      <tr class="hover:bg-gray-50/50 transition-colors">
+        <td class="px-4 py-3">
+          <div class="font-medium text-gray-800">{{ pair.group_name or pair.group_id }}</div>
+          {% if pair.group_link %}
+          <a href="{{ pair.group_link }}" target="_blank"
+             class="text-xs text-indigo-500 hover:underline">{{ pair.group_link }}</a>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-gray-600">{{ pair.channel_name or pair.channel_id }}</td>
+        <td class="px-4 py-3">
+          {% if pair.bot_name %}
+            <span class="text-gray-700">{{ pair.bot_name }}</span>
+          {% else %}
+            <span class="text-red-400 text-xs">⚠ Нет бота</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3">
+          {% if pair.verification_enabled %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
+              Включена
+            </span>
+            <div class="text-xs text-gray-400 mt-0.5">⏰ {{ pair.verification_timeout_min }} мин</div>
+          {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+              Выключена
+            </span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">
+          {% if not pair.bot_id %}
+            <span class="text-xs text-gray-400 italic">Нет бота</span>
+          {% else %}
+            <button onclick="openSettings({{ loop.index0 }})"
+                    class="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+              Настроить
+            </button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- ── Settings Modal ──────────────────────────────────────────────────────── -->
+<div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <!-- Backdrop -->
+  <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" onclick="closeSettings()"></div>
+  <!-- Panel -->
+  <div class="relative bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto">
+    <!-- Header -->
+    <div class="sticky top-0 bg-white flex items-center justify-between px-6 py-4 border-b border-gray-100 z-10">
+      <div>
+        <h2 class="text-base font-semibold text-gray-900" id="modal-title">Верификация</h2>
+        <p class="text-xs text-gray-400" id="modal-subtitle"></p>
+      </div>
+      <button onclick="closeSettings()"
+              class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Form -->
+    <form id="settings-form" class="px-6 py-5 space-y-5" onsubmit="saveSettings(event)">
+      <input type="hidden" id="pair-id">
+
+      <!-- Enable toggle row -->
+      <div class="flex items-center justify-between py-1">
+        <div>
+          <div class="text-sm font-medium text-gray-800">Включить верификацию</div>
+          <div class="text-xs text-gray-500 mt-0.5">Новичок должен подтвердить через бота</div>
+        </div>
+        <button type="button" id="toggle-btn" onclick="toggleEnabled()"
+                class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+          <span id="toggle-knob"
+                class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200"></span>
+        </button>
+      </div>
+
+      <div id="settings-fields" class="space-y-5">
+        <!-- Verification message -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">
+            Сообщение в группе при вступлении
+          </label>
+          <textarea id="field-message" rows="5"
+                    placeholder="👋 Привет, {имя}!&#10;&#10;Нажми кнопку ниже, чтобы подтвердить, что ты не бот.&#10;⏰ Время: {минут} мин."
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"></textarea>
+          <p class="text-xs text-gray-400 mt-1.5">
+            Переменные: <code class="bg-gray-100 px-1 rounded">{имя}</code>,
+            <code class="bg-gray-100 px-1 rounded">{группа}</code>,
+            <code class="bg-gray-100 px-1 rounded">{минут}</code>
+            — пустое поле = встроенный шаблон
+          </p>
+        </div>
+
+        <!-- Button text -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Текст кнопки</label>
+          <input type="text" id="field-button-text"
+                 placeholder="✅ Я не бот"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <!-- Timeout -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">
+            Время на верификацию
+          </label>
+          <div class="flex items-center gap-2">
+            <input type="number" id="field-timeout" min="1" max="1440" value="10"
+                   class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <span class="text-sm text-gray-500">минут</span>
+          </div>
+        </div>
+
+        <!-- Kick toggle -->
+        <div class="flex items-start gap-3 p-3 bg-red-50 border border-red-100 rounded-lg">
+          <input type="checkbox" id="field-kick" checked
+                 class="mt-0.5 h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500">
+          <div>
+            <label for="field-kick" class="text-sm font-medium text-gray-800 cursor-pointer">
+              Исключать из группы при истечении времени
+            </label>
+            <p class="text-xs text-gray-500 mt-0.5">
+              Участник будет удалён, если не пройдёт проверку до дедлайна
+            </p>
+          </div>
+        </div>
+
+        <!-- Notify success -->
+        <div class="flex items-start gap-3">
+          <input type="checkbox" id="field-notify" checked
+                 class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+          <div>
+            <label for="field-notify" class="text-sm font-medium text-gray-700 cursor-pointer">
+              Обновлять сообщение в группе после верификации
+            </label>
+            <p class="text-xs text-gray-500 mt-0.5">
+              Бот изменит своё сообщение: «✅ Иван прошёл проверку»
+            </p>
+          </div>
+        </div>
+
+        <!-- Welcome DM -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">
+            Приветственное сообщение в боте
+            <span class="font-normal text-gray-400">(после верификации)</span>
+          </label>
+          <textarea id="field-welcome-dm" rows="3"
+                    placeholder="Оставьте пустым — бот всё равно отправит «✅ Верификация пройдена!»"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+          <p class="text-xs text-gray-400 mt-1.5">
+            Переменные: <code class="bg-gray-100 px-1 rounded">{имя}</code>,
+            <code class="bg-gray-100 px-1 rounded">{группа}</code>
+          </p>
+        </div>
+      </div>
+
+      <!-- Footer actions -->
+      <div class="flex items-center gap-3 pt-3 border-t border-gray-100">
+        <button type="submit"
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+          Сохранить
+        </button>
+        <button type="button" onclick="closeSettings()"
+                class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors">
+          Отмена
+        </button>
+        <span id="save-status" class="text-sm ml-auto"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// All pairs serialized from server
+const PAIRS = {{ pairs_data | tojson }};
+let currentEnabled = false;
+
+function openSettings(idx) {
+  const pair = PAIRS[idx];
+  document.getElementById('pair-id').value = pair.id;
+  document.getElementById('modal-title').textContent = 'Верификация: ' + (pair.group_name || pair.group_id);
+  document.getElementById('modal-subtitle').textContent = pair.bot_name ? 'Бот: ' + pair.bot_name : '';
+
+  currentEnabled = !!pair.verification_enabled;
+  document.getElementById('field-message').value = pair.verification_message || '';
+  document.getElementById('field-button-text').value = pair.verification_button_text || '';
+  document.getElementById('field-timeout').value = pair.verification_timeout_min || 10;
+  document.getElementById('field-kick').checked = pair.verification_kick !== false;
+  document.getElementById('field-notify').checked = pair.verification_notify_success !== false;
+  document.getElementById('field-welcome-dm').value = pair.verification_welcome_dm || '';
+
+  _updateToggle();
+  document.getElementById('save-status').textContent = '';
+  document.getElementById('settings-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function toggleEnabled() {
+  currentEnabled = !currentEnabled;
+  _updateToggle();
+}
+
+function _updateToggle() {
+  const btn = document.getElementById('toggle-btn');
+  const knob = document.getElementById('toggle-knob');
+  if (currentEnabled) {
+    btn.classList.remove('bg-gray-200');
+    btn.classList.add('bg-indigo-600');
+    knob.style.transform = 'translateX(20px)';
+  } else {
+    btn.classList.remove('bg-indigo-600');
+    btn.classList.add('bg-gray-200');
+    knob.style.transform = 'translateX(4px)';
+  }
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const pairId = document.getElementById('pair-id').value;
+  const statusEl = document.getElementById('save-status');
+  statusEl.textContent = 'Сохранение…';
+  statusEl.className = 'text-sm ml-auto text-gray-500';
+
+  const body = {
+    verification_enabled: currentEnabled,
+    verification_message: document.getElementById('field-message').value.trim() || null,
+    verification_button_text: document.getElementById('field-button-text').value.trim() || null,
+    verification_timeout_min: parseInt(document.getElementById('field-timeout').value) || 10,
+    verification_kick: document.getElementById('field-kick').checked,
+    verification_notify_success: document.getElementById('field-notify').checked,
+    verification_welcome_dm: document.getElementById('field-welcome-dm').value.trim() || null,
+  };
+
+  try {
+    const resp = await fetch('/api/pairs/' + pairId + '/verification', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Ошибка сервера');
+    }
+    statusEl.textContent = '✅ Сохранено';
+    statusEl.className = 'text-sm ml-auto text-green-600 font-medium';
+    setTimeout(() => { location.reload(); }, 900);
+  } catch (err) {
+    statusEl.textContent = '❌ ' + err.message;
+    statusEl.className = 'text-sm ml-auto text-red-600';
+  }
+}
+
+// Close on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSettings();
+});
+
+// Init toggle state on page load (no-op, only matters when modal opens)
+</script>
+{% endblock %}

@@ -112,15 +112,9 @@ class MaxClient:
         message_id: str,
         text: str,
         attachments: list[dict] | None = None,
-        format: str = "markdown",
     ) -> dict:
-        """
-        Edit a message SENT BY THE BOT.
-        ⚠️  LIMITATION: Cannot edit messages authored by humans.
-        If the channel post was created by a human admin, this call will
-        return 403. The bot falls back to posting a reply with the button.
-        """
-        payload: dict[str, Any] = {"text": text, "format": format}
+        """Edit a channel post (bot must be admin)."""
+        payload: dict[str, Any] = {"text": text}
         if attachments:
             payload["attachments"] = attachments
         return await self._request("PUT", "/messages", params={"message_id": message_id}, json=payload)

@@ -4,7 +4,9 @@ Event handlers for Max Bot API updates.
 Flow for new channel post:
   1. Look up the ChannelGroupPair for this channel + bot.
   2. Duplicate post to the discussion group.
-  3. Send a standalone button message to the channel (preserves original post untouched).
+  3. Edit the original channel post to add the inline button.
+     - First try: edit with [share_url_att + button] to preserve link preview.
+     - Fallback: edit with just [button] (preview disappears but button is clean).
   4. Save PostLink: channel_post_id → group_message_id.
   5. Write EventLog entry.
 """
@@ -87,8 +89,9 @@ async def _handle_message_created(
     # ── Step 1: Duplicate post to discussion group ────────────────────────────
     header = discussion_header(pair.channel_name or chat_id, message_id)
     group_text = header + (text or "")
-    # Only forward media attachments — share tokens are context-specific and
-    # invalid in a different chat. URL in text will auto-generate a fresh preview.
+    # Only forward media attachments (image/video/audio/file).
+    # share tokens are context-specific — invalid in a different chat.
+    # URL in text will auto-generate a fresh preview in the group.
     forwardable_attachments = _extract_media_attachments(message_body)
 
     try:
@@ -106,21 +109,29 @@ async def _handle_message_created(
 
     group_message_id = str(group_resp.get("message", {}).get("mid", ""))
 
-    # ── Step 2: Post button as standalone message in the channel ─────────────
-    # We intentionally do NOT edit the original post (editing removes link previews)
-    # and do NOT use reply (reply shows an ugly quote of the original).
-    # A plain message with just the inline keyboard is the cleanest approach.
+    # ── Step 2: Edit original channel post to add button ─────────────────────
+    # Strategy A: edit with [share_by_url + button] — preserves link preview.
+    # Strategy B: edit with [button] only — clean but preview disappears.
     button = comment_button(pair.group_link, group_message_id)
-    try:
-        await client.send_message(
-            chat_id=chat_id,
-            text="💬",
-            attachments=[button],
-        )
-    except MaxAPIError as exc:
-        logger.warning("Failed to send button to channel (status=%s body=%s)", exc.status, exc.body)
+
+    # Extract share URL from original attachment (if any)
+    share_url = _extract_share_url(message_body)
+
+    edited = False
+    if share_url:
+        # Try to rebuild the share preview using the URL (not the token)
+        share_att = {"type": "share", "payload": {"url": share_url}}
+        edited = await _try_edit(client, message_id, text, [share_att, button])
+        if not edited:
+            logger.info("Edit with share_url failed for %s, retrying with button only", message_id)
+
+    if not edited:
+        edited = await _try_edit(client, message_id, text, [button])
+
+    if not edited:
+        logger.warning("Could not edit post %s — button not added", message_id)
         await _log(session, pair.user_id, bot_id, LogLevel.warning,
-                   f"Could not send button for post {message_id}: {exc}")
+                   f"Could not add button to post {message_id}")
 
     # ── Step 3: Persist link ──────────────────────────────────────────────────
     session.add(PostLink(
@@ -135,14 +146,26 @@ async def _handle_message_created(
     await session.commit()
 
 
+async def _try_edit(
+    client: MaxClient,
+    message_id: str,
+    text: str,
+    attachments: list[dict],
+) -> bool:
+    """Edit a message with given attachments. Returns True on success."""
+    try:
+        await client.edit_message(message_id=message_id, text=text or "", attachments=attachments)
+        logger.info("Edited post %s with %d attachment(s)", message_id, len(attachments))
+        return True
+    except MaxAPIError as exc:
+        logger.warning("Edit %s failed (status=%s): %s", message_id, exc.status, exc.body)
+        return False
+
 
 def _extract_media_attachments(body: dict) -> list[dict]:
     """
-    Extract attachments that can be forwarded to another chat (by token).
-    Captures: image, video, audio, file.
-    NOTE: "share" (link preview) tokens are context-specific and cannot be
-    re-sent to a different chat — so they are intentionally excluded here.
-    The URL in the text will auto-generate a fresh preview in the group.
+    Extract attachments forwardable to another chat (image/video/audio/file by token).
+    Excludes 'share' — those tokens are context-specific.
     """
     attachments = []
     for att in body.get("attachments", []):
@@ -154,6 +177,14 @@ def _extract_media_attachments(body: dict) -> list[dict]:
     return attachments
 
 
+def _extract_share_url(body: dict) -> str | None:
+    """Return the URL from the first 'share' attachment, if present."""
+    for att in body.get("attachments", []):
+        if att.get("type") == "share":
+            url = att.get("payload", {}).get("url")
+            if url:
+                return url
+    return None
 
 
 async def _log(

@@ -414,26 +414,40 @@ async def _handle_bot_started(
             .replace("{имя}", vr.user_name)
             .replace("{группа}", pair.group_name or pair.group_id)
         )
-        await _send_dm_safe(client, chat_id_for_dm, welcome_text)
     else:
-        # Always confirm success in DM
-        group_link_part = (
-            f" Вернитесь в группу: {pair.group_link}" if pair.group_link else ""
-        )
-        await _send_dm_safe(
-            client, chat_id_for_dm,
-            f"✅ Верификация пройдена! Добро пожаловать в *{pair.group_name or 'группу'}*.{group_link_part}"
-        )
+        welcome_text = f"✅ Верификация пройдена! Добро пожаловать в *{pair.group_name or 'группу'}*."
+
+    # Attach "Return to group" button if the group has a public link
+    return_button = None
+    if pair.group_link:
+        return_button = {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [[{
+                    "type": "link",
+                    "text": "💬 Вернуться в группу",
+                    "url": pair.group_link,
+                }]]
+            },
+        }
+
+    await _send_dm_safe(client, chat_id_for_dm, welcome_text,
+                        attachments=[return_button] if return_button else None)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-async def _send_dm_safe(client: MaxClient, chat_id: str, text: str) -> None:
+async def _send_dm_safe(
+    client: MaxClient,
+    chat_id: str,
+    text: str,
+    attachments: list[dict] | None = None,
+) -> None:
     """Send a DM; swallow errors (user may have blocked the bot)."""
     if not chat_id:
         return
     try:
-        await client.send_message(chat_id=chat_id, text=text)
+        await client.send_message(chat_id=chat_id, text=text, attachments=attachments)
     except MaxAPIError as exc:
         logger.warning("Could not send DM to %s: %s", chat_id, exc)
 

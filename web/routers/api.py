@@ -448,6 +448,7 @@ class WelcomeConfigCreate(BaseModel):
 
 
 class WelcomeConfigUpdate(BaseModel):
+    group_link: str | None = None
     verification_enabled: bool | None = None
     verification_timeout_min: int | None = None
     verification_message: str | None = None
@@ -539,6 +540,9 @@ async def update_welcome_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Welcome config not found")
+
+    if body.group_link is not None:
+        config.group_link = body.group_link
 
     if body.verification_enabled is not None:
         config.verification_enabled = body.verification_enabled

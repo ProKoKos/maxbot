@@ -110,7 +110,7 @@ async def _publish_one(post: ScheduledPost) -> None:
                     text=post.text,
                     attachments=attachments,
                 )
-                channel_msg_id = str(resp.get("message", {}).get("mid", ""))
+                channel_msg_id = str(resp.get("message", {}).get("body", {}).get("mid", ""))
 
                 # Duplicate to discussion group
                 group_text = discussion_header(pair.channel_name, channel_msg_id, pair.channel_link or "") + post.text
@@ -118,7 +118,7 @@ async def _publish_one(post: ScheduledPost) -> None:
                     chat_id=pair.group_id,
                     text=group_text,
                 )
-                group_msg_id = str(group_resp.get("message", {}).get("mid", ""))
+                group_msg_id = str(group_resp.get("message", {}).get("body", {}).get("mid", ""))
 
                 session.add(PostLink(
                     pair_id=pair.id,

@@ -150,7 +150,7 @@ async def _handle_message_created(
         await session.commit()
         return
 
-    group_message_id = str(group_resp.get("message", {}).get("mid", ""))
+    group_message_id = str(group_resp.get("message", {}).get("body", {}).get("mid", ""))
 
     # Step 2: Edit original channel post to add discussion button
     button = comment_button(pair.group_link, group_message_id)
@@ -288,8 +288,9 @@ async def _handle_member_added(
             text=msg_text,
             attachments=[verify_button],
         )
-        logger.info("send_message response: %s", resp)
-        group_message_id = str(resp.get("message", {}).get("mid", "")) or None
+        group_message_id = (
+            str(resp.get("message", {}).get("body", {}).get("mid", "")) or None
+        )
     except MaxAPIError as exc:
         logger.error("Failed to send verification message to group %s: %s", chat_id, exc)
         await _log(session, pair.user_id, bot_id, LogLevel.error,

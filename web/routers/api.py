@@ -404,6 +404,47 @@ async def delete_pair(pair_id: int, current_user: CurrentUser, session: DBSessio
     await session.commit()
 
 
+# ── Welcome / verification-only groups ───────────────────────────────────────
+
+class WelcomeGroupCreate(BaseModel):
+    group_id: str
+    group_name: str
+    group_link: str = ""
+    bot_id: int
+
+
+@router.post("/welcome/groups", status_code=201)
+async def create_welcome_group(
+    body: WelcomeGroupCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    """Create a verification-only group (no channel pair needed)."""
+    bot_result = await session.execute(
+        select(Bot).where(Bot.id == body.bot_id, Bot.user_id == current_user.id)
+    )
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(404, "Bot not found")
+
+    pair = ChannelGroupPair(
+        user_id=current_user.id,
+        bot_id=body.bot_id,
+        channel_id="",          # verification-only: no channel
+        channel_name="",
+        channel_link="",
+        group_id=body.group_id,
+        group_name=body.group_name,
+        group_link=body.group_link,
+        enabled=False,          # post duplication disabled
+        verification_enabled=True,
+    )
+    session.add(pair)
+    await session.commit()
+    await session.refresh(pair)
+    return {"id": pair.id}
+
+
 # ── Logs ──────────────────────────────────────────────────────────────────────
 
 @router.get("/logs")

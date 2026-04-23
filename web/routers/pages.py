@@ -589,6 +589,14 @@ async def welcome_page(request: Request, session: DBSession):
         for p in pairs
     ]
 
+    bots_list = [
+        {
+            "id": b.id,
+            "name": f"@{b.max_username or b.name}",
+        }
+        for b in bots
+    ]
+
     return templates.TemplateResponse(
         "welcome.html",
         {
@@ -596,6 +604,7 @@ async def welcome_page(request: Request, session: DBSession):
             "user": user,
             "pairs_data": pairs_data,
             "bot_map": bot_map,
+            "bots_list": bots_list,
             "active_page": "welcome",
             "default_verify_msg": _DEFAULT_VERIFY_MSG,
             "default_verify_btn": _DEFAULT_VERIFY_BTN,

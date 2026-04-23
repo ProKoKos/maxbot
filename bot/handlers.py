@@ -398,17 +398,12 @@ async def _handle_bot_started(
     )
     await session.commit()
 
-    # Edit group message if configured
-    if pair.verification_notify_success and vr.group_message_id:
-        success_text = _DEFAULT_SUCCESS_MSG.replace("{имя}", vr.user_name)
+    # Delete group verification message to keep the chat clean
+    if vr.group_message_id:
         try:
-            await client.edit_message(
-                message_id=vr.group_message_id,
-                text=success_text,
-                attachments=[],
-            )
+            await client.delete_message(message_id=vr.group_message_id)
         except MaxAPIError as exc:
-            logger.warning("Could not edit group verification message %s: %s", vr.group_message_id, exc)
+            logger.warning("Could not delete group verification message %s: %s", vr.group_message_id, exc)
 
     # Send welcome DM in bot chat
     if pair.verification_welcome_dm:

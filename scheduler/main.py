@@ -239,18 +239,13 @@ async def _process_expired(vr: VerificationRequest) -> None:
                         vr.max_user_id, pair.group_id, exc,
                     )
 
-            # 2. Edit group verification message to show failure
+            # 2. Delete group verification message to keep the chat clean
             if vr.group_message_id:
-                kick_text = _DEFAULT_KICK_MSG.replace("{имя}", vr.user_name)
                 try:
-                    await client.edit_message(
-                        message_id=vr.group_message_id,
-                        text=kick_text,
-                        attachments=[],
-                    )
+                    await client.delete_message(message_id=vr.group_message_id)
                 except MaxAPIError as exc:
                     logger.warning(
-                        "Could not edit verification message %s: %s",
+                        "Could not delete verification message %s: %s",
                         vr.group_message_id, exc,
                     )
 

@@ -119,6 +119,13 @@ class MaxClient:
             payload["attachments"] = attachments
         return await self._request("PUT", "/messages", params={"message_id": message_id}, json=payload)
 
+    async def delete_message(self, message_id: str) -> None:
+        """Delete a message by its ID (bot must be admin in the chat)."""
+        try:
+            await self._request("DELETE", "/messages", params={"message_id": message_id})
+        except MaxAPIError as exc:
+            raise exc
+
     async def reply_to_message(
         self,
         chat_id: str,

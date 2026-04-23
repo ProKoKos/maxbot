@@ -7,7 +7,7 @@
     <h1 class="text-2xl font-bold text-gray-900">Автопостинг</h1>
     <p class="text-sm text-gray-500 mt-1">Запланируй пост — бот опубликует его в нужное время</p>
   </div>
-  <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+  <button onclick="openCreateModal()"
           class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
     + Новый пост
   </button>
@@ -31,7 +31,7 @@
       {% set pair = pairs | selectattr("id", "equalto", post.pair_id) | first | default(None) %}
       <tr id="post-{{ post.id }}">
         <td class="px-5 py-3 whitespace-nowrap text-gray-700 font-mono text-xs">
-          {{ post.scheduled_at.strftime("%d.%m.%Y %H:%M") }}
+          {{ post.scheduled_at.strftime("%d.%m.%Y %H:%M UTC") }}
         </td>
         <td class="px-5 py-3 text-gray-600 text-xs">
           {{ pair.channel_name if pair else post.pair_id }}
@@ -53,8 +53,13 @@
           </p>
           {% endif %}
         </td>
-        <td class="px-5 py-3 text-right">
+        <td class="px-5 py-3 text-right space-x-1">
+          {% set st = post.status.value if post.status.value is defined else post.status %}
           {% if st == 'pending' %}
+          <button onclick='openEditModal({{ post.id }}, {{ post.pair_id }}, {{ post.text | tojson }}, "{{ post.scheduled_at.strftime("%Y-%m-%dT%H:%M") }}")'
+                  class="text-xs px-2 py-1 rounded border border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 transition-colors">
+            Изменить
+          </button>
           <button onclick="deletePost({{ post.id }})"
                   class="text-xs px-2 py-1 rounded border border-red-100 text-red-500 hover:bg-red-50 transition-colors">
             Отменить
@@ -73,17 +78,18 @@
   {% endif %}
 </div>
 
-<!-- Create post modal -->
-<div id="create-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+<!-- Shared modal (create / edit) -->
+<div id="post-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">Новый отложенный пост</h2>
+    <h2 id="post-modal-title" class="text-lg font-semibold text-gray-900 mb-4">Новый отложенный пост</h2>
 
     <div id="modal-error" class="hidden mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600"></div>
 
-    <form id="create-form" class="space-y-4">
+    <form id="post-form" class="space-y-4">
+      <input type="hidden" id="edit-post-id" value="">
       <div>
         <label class="block text-xs font-medium text-gray-600 mb-1">Пара (канал → группа)</label>
-        <select name="pair_id" required
+        <select id="f-pair-id" name="pair_id" required
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
           <option value="">— Выбрать —</option>
           {% for p in pairs %}
@@ -93,17 +99,19 @@
       </div>
       <div>
         <label class="block text-xs font-medium text-gray-600 mb-1">Текст поста</label>
-        <textarea name="text" required rows="5" placeholder="Поддерживается Markdown..."
+        <textarea id="f-text" name="text" required rows="5" placeholder="Поддерживается Markdown..."
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"></textarea>
       </div>
       <div>
-        <label class="block text-xs font-medium text-gray-600 mb-1">Дата и время публикации (UTC)</label>
-        <input type="datetime-local" name="scheduled_at" required
+        <label class="block text-xs font-medium text-gray-600 mb-1">
+          Дата и время публикации
+          <span class="text-gray-400 font-normal">(ваш часовой пояс: <span id="tz-label">...</span>)</span>
+        </label>
+        <input type="datetime-local" id="f-scheduled-at" name="scheduled_at" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
       </div>
       <div class="flex justify-end gap-2 pt-1">
-        <button type="button"
-                onclick="document.getElementById('create-modal').classList.add('hidden')"
+        <button type="button" onclick="closeModal()"
                 class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Отмена</button>
         <button type="submit"
                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">
@@ -117,17 +125,58 @@
 
 {% block scripts %}
 <script>
-  document.getElementById("create-form").addEventListener("submit", async (e) => {
+  // Показываем часовой пояс браузера
+  const userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  document.getElementById("tz-label").textContent = userTZ;
+
+  function openCreateModal() {
+    document.getElementById("post-modal-title").textContent = "Новый отложенный пост";
+    document.getElementById("edit-post-id").value = "";
+    document.getElementById("post-form").reset();
+    document.getElementById("modal-error").classList.add("hidden");
+    document.getElementById("post-modal").classList.remove("hidden");
+  }
+
+  function openEditModal(id, pairId, text, scheduledAtUTC) {
+    document.getElementById("post-modal-title").textContent = "Редактировать пост";
+    document.getElementById("edit-post-id").value = id;
+    document.getElementById("modal-error").classList.add("hidden");
+
+    document.getElementById("f-pair-id").value = String(pairId);
+    document.getElementById("f-text").value = text;
+
+    // Конвертируем UTC из сервера в локальное время браузера для datetime-local
+    const dt = new Date(scheduledAtUTC + "Z"); // добавляем Z чтобы парсить как UTC
+    const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
+      .toISOString().slice(0, 16);
+    document.getElementById("f-scheduled-at").value = local;
+
+    document.getElementById("post-modal").classList.remove("hidden");
+  }
+
+  function closeModal() {
+    document.getElementById("post-modal").classList.add("hidden");
+  }
+
+  document.getElementById("post-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const fd = new FormData(e.target);
+    const pairId = document.getElementById("f-pair-id").value;
+    const text = document.getElementById("f-text").value;
+    const scheduledAt = document.getElementById("f-scheduled-at").value;
+    const postId = document.getElementById("edit-post-id").value;
+
     const body = {
-      pair_id: parseInt(fd.get("pair_id")),
-      text: fd.get("text"),
-      scheduled_at: new Date(fd.get("scheduled_at")).toISOString(),
+      pair_id: parseInt(pairId),
+      text: text,
+      scheduled_at: new Date(scheduledAt).toISOString(),
     };
 
-    const res = await fetch("/api/posts", {
-      method: "POST",
+    const isEdit = !!postId;
+    const url = isEdit ? `/api/posts/${postId}` : "/api/posts";
+    const method = isEdit ? "PATCH" : "POST";
+
+    const res = await fetch(url, {
+      method,
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body),
     });

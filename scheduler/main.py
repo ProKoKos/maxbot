@@ -110,7 +110,7 @@ async def _publish_one(post: ScheduledPost) -> None:
                 channel_msg_id = str(resp.get("message", {}).get("mid", ""))
 
                 # Duplicate to discussion group
-                group_text = discussion_header(pair.channel_name, channel_msg_id) + post.text
+                group_text = discussion_header(pair.channel_name, channel_msg_id, pair.channel_link or "") + post.text
                 group_resp = await client.send_message(
                     chat_id=pair.group_id,
                     text=group_text,

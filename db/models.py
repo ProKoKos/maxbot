@@ -67,7 +67,7 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
-    plan: Mapped[Plan] = mapped_column(Enum(Plan), default=Plan.free)
+    plan: Mapped[Plan] = mapped_column(Enum(Plan, native_enum=False), default=Plan.free)
     # JSON-encoded limits: {"max_bots": 3, "max_pairs": 5, "max_posts_per_day": 20}
     limits: Mapped[str] = mapped_column(
         Text, default='{"max_bots": 1, "max_pairs": 1, "max_posts_per_day": 10}'
@@ -195,7 +195,7 @@ class EventLog(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     # Which bot generated the event (optional context)
     bot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bots.id", ondelete="SET NULL"), nullable=True)
-    level: Mapped[LogLevel] = mapped_column(Enum(LogLevel), default=LogLevel.info)
+    level: Mapped[LogLevel] = mapped_column(Enum(LogLevel, native_enum=False), default=LogLevel.info)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -219,7 +219,7 @@ class ScheduledPost(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     attachments_json: Mapped[str] = mapped_column(Text, default="[]")
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[PostStatus] = mapped_column(Enum(PostStatus), default=PostStatus.pending)
+    status: Mapped[PostStatus] = mapped_column(Enum(PostStatus, native_enum=False), default=PostStatus.pending)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

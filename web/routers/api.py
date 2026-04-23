@@ -485,6 +485,52 @@ async def create_post(body: PostCreate, current_user: CurrentUser, session: DBSe
     return {"id": post.id}
 
 
+class PostUpdate(BaseModel):
+    pair_id: int | None = None
+    text: str | None = None
+    scheduled_at: datetime | None = None
+
+
+@router.patch("/posts/{post_id}")
+async def update_post(
+    post_id: int, body: PostUpdate, current_user: CurrentUser, session: DBSession, _: RateLimit
+):
+    result = await session.execute(
+        select(ScheduledPost).where(
+            ScheduledPost.id == post_id,
+            ScheduledPost.user_id == current_user.id,
+            ScheduledPost.status == PostStatus.pending,
+        )
+    )
+    post = result.scalar_one_or_none()
+    if not post:
+        raise HTTPException(404, "Post not found or already sent/cancelled")
+
+    if body.pair_id is not None:
+        pair_result = await session.execute(
+            select(ChannelGroupPair).where(
+                ChannelGroupPair.id == body.pair_id,
+                ChannelGroupPair.user_id == current_user.id,
+                ChannelGroupPair.bot_id.isnot(None),
+            )
+        )
+        if not pair_result.scalar_one_or_none():
+            raise HTTPException(404, "Pair not found or has no bot assigned")
+        post.pair_id = body.pair_id
+
+    if body.text is not None:
+        post.text = body.text
+
+    if body.scheduled_at is not None:
+        scheduled_at = body.scheduled_at
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        post.scheduled_at = scheduled_at
+
+    await session.commit()
+    return {"ok": True}
+
+
 @router.delete("/posts/{post_id}", status_code=204)
 async def delete_post(post_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
     result = await session.execute(

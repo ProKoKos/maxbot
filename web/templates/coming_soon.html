@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="text-3xl">{{ icon }}</span>
+    <h1 class="text-2xl font-bold text-gray-900">{{ title }}</h1>
+    <span class="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">Скоро</span>
+  </div>
+  <p class="text-gray-500 mt-2 max-w-2xl">{{ description }}</p>
+</div>
+
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+  {% for feature in features %}
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex gap-4">
+    <div class="text-2xl shrink-0 mt-0.5">{{ feature.icon }}</div>
+    <div>
+      <h3 class="font-semibold text-gray-800 text-sm mb-1">{{ feature.title }}</h3>
+      <p class="text-xs text-gray-500 leading-relaxed">{{ feature.description }}</p>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

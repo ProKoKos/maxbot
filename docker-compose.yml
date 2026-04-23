@@ -63,7 +63,7 @@ services:
     networks:
       - maxbot
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/login || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/login')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

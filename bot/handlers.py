@@ -288,6 +288,7 @@ async def _handle_member_added(
             text=msg_text,
             attachments=[verify_button],
         )
+        logger.info("send_message response: %s", resp)
         group_message_id = str(resp.get("message", {}).get("mid", "")) or None
     except MaxAPIError as exc:
         logger.error("Failed to send verification message to group %s: %s", chat_id, exc)

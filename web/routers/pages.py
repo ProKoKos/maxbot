@@ -534,6 +534,17 @@ async def ai_gen_page(request: Request, session: DBSession):
 
 # ── Аудитория ─────────────────────────────────────────────────────────────────
 
+# Default verification strings — kept in sync with bot/handlers.py
+_DEFAULT_VERIFY_MSG = (
+    "👋 Привет, {имя}!\n\n"
+    "Добро пожаловать в {группа}. Чтобы получить доступ к чату, подтвердите, "
+    "что вы не бот — нажмите кнопку ниже.\n\n"
+    "⏰ Время на верификацию: {минут} мин."
+)
+_DEFAULT_VERIFY_BTN = "✅ Я не бот"
+_DEFAULT_WELCOME_DM = "✅ Верификация пройдена! Добро пожаловать в {группа}."
+
+
 @router.get("/welcome", response_class=HTMLResponse)
 async def welcome_page(request: Request, session: DBSession):
     user = await _require_user(request, session)
@@ -586,6 +597,9 @@ async def welcome_page(request: Request, session: DBSession):
             "pairs_data": pairs_data,
             "bot_map": bot_map,
             "active_page": "welcome",
+            "default_verify_msg": _DEFAULT_VERIFY_MSG,
+            "default_verify_btn": _DEFAULT_VERIFY_BTN,
+            "default_welcome_dm": _DEFAULT_WELCOME_DM,
         },
     )
 

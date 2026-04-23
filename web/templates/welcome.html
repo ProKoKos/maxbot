@@ -141,7 +141,6 @@
             Сообщение в группе при вступлении
           </label>
           <textarea id="field-message" rows="5"
-                    placeholder="👋 Привет, {имя}!&#10;&#10;Нажми кнопку ниже, чтобы подтвердить, что ты не бот.&#10;⏰ Время: {минут} мин."
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"></textarea>
           <p class="text-xs text-gray-400 mt-1.5">
             Переменные: <code class="bg-gray-100 px-1 rounded">{имя}</code>,
@@ -155,7 +154,6 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1.5">Текст кнопки</label>
           <input type="text" id="field-button-text"
-                 placeholder="✅ Я не бот"
                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
         </div>
 
@@ -206,7 +204,6 @@
             <span class="font-normal text-gray-400">(после верификации)</span>
           </label>
           <textarea id="field-welcome-dm" rows="3"
-                    placeholder="Оставьте пустым — бот всё равно отправит «✅ Верификация пройдена!»"
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
           <p class="text-xs text-gray-400 mt-1.5">
             Переменные: <code class="bg-gray-100 px-1 rounded">{имя}</code>,
@@ -234,6 +231,14 @@
 <script>
 // All pairs serialized from server
 const PAIRS = {{ pairs_data | tojson }};
+
+// Default values shown when pair fields are not yet configured
+const DEFAULTS = {
+  message:   {{ default_verify_msg | tojson }},
+  buttonText: {{ default_verify_btn | tojson }},
+  welcomeDm: {{ default_welcome_dm | tojson }},
+};
+
 let currentEnabled = false;
 
 function openSettings(idx) {
@@ -243,12 +248,12 @@ function openSettings(idx) {
   document.getElementById('modal-subtitle').textContent = pair.bot_name ? 'Бот: ' + pair.bot_name : '';
 
   currentEnabled = !!pair.verification_enabled;
-  document.getElementById('field-message').value = pair.verification_message || '';
-  document.getElementById('field-button-text').value = pair.verification_button_text || '';
+  document.getElementById('field-message').value = pair.verification_message || DEFAULTS.message;
+  document.getElementById('field-button-text').value = pair.verification_button_text || DEFAULTS.buttonText;
   document.getElementById('field-timeout').value = pair.verification_timeout_min || 10;
   document.getElementById('field-kick').checked = pair.verification_kick !== false;
   document.getElementById('field-notify').checked = pair.verification_notify_success !== false;
-  document.getElementById('field-welcome-dm').value = pair.verification_welcome_dm || '';
+  document.getElementById('field-welcome-dm').value = pair.verification_welcome_dm || DEFAULTS.welcomeDm;
 
   _updateToggle();
   document.getElementById('save-status').textContent = '';

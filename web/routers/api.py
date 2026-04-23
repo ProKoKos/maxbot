@@ -262,7 +262,9 @@ async def get_bot_chats(bot_id: int, current_user: CurrentUser, session: DBSessi
 
 @router.get("/bots/{bot_id}/groups")
 async def get_bot_groups(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
-    """Fetch only group chats where the bot is a member (used in welcome config add modal)."""
+    """Fetch only group chats where the bot is a member (used in welcome config add modal).
+    Enriches the link from ChannelGroupPair if the Max API returned an empty value.
+    """
     result = await session.execute(
         select(Bot).where(Bot.id == bot_id, Bot.user_id == current_user.id)
     )
@@ -281,15 +283,30 @@ async def get_bot_groups(bot_id: int, current_user: CurrentUser, session: DBSess
         except MaxAPIError as exc:
             raise HTTPException(502, f"MAX API error: {exc}")
 
-    groups = [
-        {
-            "chat_id": str(chat["chat_id"]),
+    # Build a lookup: group_id → group_link from existing pairs (owned by this user)
+    pairs_result = await session.execute(
+        select(ChannelGroupPair).where(
+            ChannelGroupPair.user_id == current_user.id,
+            ChannelGroupPair.group_link.isnot(None),
+            ChannelGroupPair.group_link != "",
+        )
+    )
+    pair_link_map: dict[str, str] = {
+        p.group_id: p.group_link
+        for p in pairs_result.scalars().all()
+    }
+
+    groups = []
+    for chat in data.get("chats", []):
+        if chat.get("type") != "chat":
+            continue
+        chat_id = str(chat["chat_id"])
+        link = chat.get("link") or pair_link_map.get(chat_id, "")
+        groups.append({
+            "chat_id": chat_id,
             "title": chat.get("title", ""),
-            "link": chat.get("link") or "",
-        }
-        for chat in data.get("chats", [])
-        if chat.get("type") == "chat"
-    ]
+            "link": link,
+        })
     return {"groups": groups}
 
 
@@ -510,12 +527,26 @@ async def create_welcome_config(
     if existing.scalar_one_or_none():
         raise HTTPException(409, "A welcome config for this bot+group already exists")
 
+    # If no group_link provided, fall back to matching ChannelGroupPair
+    group_link = body.group_link
+    if not group_link:
+        pair_result = await session.execute(
+            select(ChannelGroupPair).where(
+                ChannelGroupPair.group_id == body.group_id,
+                ChannelGroupPair.user_id == current_user.id,
+                ChannelGroupPair.group_link != "",
+            )
+        )
+        pair = pair_result.scalar_one_or_none()
+        if pair and pair.group_link:
+            group_link = pair.group_link
+
     config = WelcomeConfig(
         user_id=current_user.id,
         bot_id=body.bot_id,
         group_id=body.group_id,
         group_name=body.group_name,
-        group_link=body.group_link,
+        group_link=group_link,
     )
     session.add(config)
     await session.commit()

@@ -542,7 +542,7 @@ _DEFAULT_VERIFY_MSG = (
     "⏰ Время на верификацию: {минут} мин."
 )
 _DEFAULT_VERIFY_BTN = "✅ Я не бот"
-_DEFAULT_WELCOME_DM = "✅ Верификация пройдена! Добро пожаловать в {группа}."
+_DEFAULT_WELCOME_DM = "✅ Верификация пройдена! Добро пожаловать в {группа}.\n\nНажмите кнопку ниже, чтобы вернуться в чат."
 
 
 @router.get("/welcome", response_class=HTMLResponse)

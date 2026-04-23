@@ -165,14 +165,22 @@ class BotSupervisor:
                 updates = data.get("updates", [])
                 new_marker = data.get("marker")
 
+                # TEMP DEBUG: log every non-empty response
+                if data.get("updates") is not None or len(data.keys()) > 1:
+                    logger.info(
+                        "Bot %d /updates response keys=%s updates_count=%d marker=%s",
+                        bot_id, list(data.keys()), len(updates), new_marker,
+                    )
+
                 if updates:
                     for upd in updates:
                         # TEMP DEBUG: log every raw update so we can identify event types
                         logger.info(
-                            "Bot %d RAW update: type=%r keys=%s",
+                            "Bot %d RAW update: type=%r keys=%s full=%s",
                             bot_id,
                             upd.get("update_type") or upd.get("type"),
                             list(upd.keys()),
+                            upd,
                         )
                     async with AsyncSessionLocal() as session:
                         for upd in updates:

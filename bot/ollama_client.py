@@ -18,5 +18,6 @@ async def chat(model: str, messages: list[dict], timeout: int = 60) -> str:
             json={"model": model, "messages": messages},
             timeout=timeout,
         )
-        resp.raise_for_status()
+        if resp.is_error:
+            raise RuntimeError(f"OpenRouter {resp.status_code}: {resp.text}")
         return resp.json()["choices"][0]["message"]["content"]

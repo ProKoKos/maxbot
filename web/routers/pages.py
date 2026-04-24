@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Bot, ChannelGroupPair, EventLog, PostStatus, ScheduledPost, User, WelcomeConfig
+from db.models import AssistantConfig, Bot, ChannelGroupPair, EventLog, PostStatus, ScheduledPost, User, WelcomeConfig
 from db.session import get_async_session
 from shared.config import get_settings
 from web.auth import create_access_token, verify_password
@@ -963,69 +963,59 @@ async def leads_page(request: Request, session: DBSession):
 @router.get("/assistant", response_class=HTMLResponse)
 async def assistant_page(request: Request, session: DBSession):
     user = await _require_user(request, session)
-    return _coming_soon(request, user, "assistant",
-        title="AI-ассистент",
-        icon="🤖",
-        description=(
-            "Обученный на ваших материалах AI-ассистент отвечает на вопросы "
-            "подписчиков в личных сообщениях 24/7 — как персональный эксперт по вашей теме."
-        ),
-        features=[
-            {
-                "icon": "📖",
-                "title": "Обучение на собственных данных",
-                "description": (
-                    "Загрузите архив постов канала, документы, статьи, PDF — ассистент "
-                    "проиндексирует всё это и будет отвечать, опираясь именно на ваши "
-                    "материалы, а не на общие знания. Ответы всегда в теме."
-                ),
-            },
-            {
-                "icon": "💬",
-                "title": "Полноценный диалог",
-                "description": (
-                    "Ассистент помнит контекст разговора: пользователь может "
-                    "уточнять, переформулировать, задавать уточняющие вопросы. "
-                    "Разговор ощущается естественным, а не как поиск по базе."
-                ),
-            },
-            {
-                "icon": "🎭",
-                "title": "Настраиваемая личность",
-                "description": (
-                    "Задайте имя, тон общения (официальный, дружелюбный, экспертный), "
-                    "запрещённые темы и приоритетные сценарии. Ассистент будет "
-                    "последовательным лицом вашего бренда."
-                ),
-            },
-            {
-                "icon": "🔗",
-                "title": "Ссылки на источники",
-                "description": (
-                    "Каждый ответ сопровождается ссылкой на пост или документ, "
-                    "из которого взята информация. Пользователь может перейти "
-                    "и изучить тему подробнее — это повышает доверие к ассистенту."
-                ),
-            },
-            {
-                "icon": "🚨",
-                "title": "Передача сложных случаев",
-                "description": (
-                    "Если ассистент не уверен в ответе или пользователь неудовлетворён, "
-                    "диалог передаётся живому оператору в Helpdesk. "
-                    "Переход происходит плавно — с сохранением всей истории чата."
-                ),
-            },
-            {
-                "icon": "🔄",
-                "title": "Актуализация знаний",
-                "description": (
-                    "При публикации новых постов в канале они автоматически попадают "
-                    "в базу знаний ассистента. Не нужно вручную обновлять данные — "
-                    "ассистент всегда в курсе последних материалов."
-                ),
-            },
-        ],
+
+    configs_result = await session.execute(
+        select(AssistantConfig)
+        .where(AssistantConfig.user_id == user.id)
+        .order_by(AssistantConfig.created_at.desc())
+    )
+    configs = configs_result.scalars().all()
+
+    bots_result = await session.execute(
+        select(Bot).where(Bot.user_id == user.id)
+    )
+    bots = bots_result.scalars().all()
+    bot_map = {b.id: b for b in bots}
+
+    configs_data = [
+        {
+            "id": c.id,
+            "group_name": c.group_name or "",
+            "group_id": c.group_id,
+            "bot_id": c.bot_id,
+            "bot_name": (
+                f"@{bot_map[c.bot_id].max_username or bot_map[c.bot_id].name}"
+                if c.bot_id and c.bot_id in bot_map
+                else ""
+            ),
+            "is_enabled": c.is_enabled,
+            "system_prompt": c.system_prompt or "",
+            "model_name": c.model_name,
+        }
+        for c in configs
+    ]
+
+    bots_list = [
+        {
+            "id": b.id,
+            "name": (
+                f"{b.name} (@{b.max_username})" if b.name and b.max_username
+                else b.name or f"@{b.max_username}"
+            ),
+        }
+        for b in bots
+        if b.is_active
+    ]
+
+    return templates.TemplateResponse(
+        "assistant.html",
+        {
+            "request": request,
+            "user": user,
+            "configs_data": configs_data,
+            "bots_list": bots_list,
+            "active_page": "assistant",
+        },
     )
 
 

@@ -354,3 +354,81 @@ class VerificationRequest(Base):
         Index("ix_verification_token", "token"),
         Index("ix_verification_status_deadline", "status", "deadline"),
     )
+
+
+# ─── AI Assistant ──────────────────────────────────────────────────────────────
+
+class AssistantConfig(Base):
+    """Per-(bot, group) AI assistant configuration."""
+    __tablename__ = "assistant_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    group_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    group_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False, default="llama-3.3-70b-versatile")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    bot: Mapped["Bot"] = relationship()
+    user_contexts: Mapped[list["UserBotContext"]] = relationship(
+        back_populates="assistant_config", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "group_id", name="uq_assistant_config_bot_group"),
+        Index("ix_assistant_config_bot_group", "bot_id", "group_id"),
+    )
+
+
+class UserBotContext(Base):
+    """Tracks which groups a MAX user has been verified in for a given bot."""
+    __tablename__ = "user_bot_contexts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    assistant_config_id: Mapped[int] = mapped_column(
+        ForeignKey("assistant_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    assistant_config: Mapped["AssistantConfig"] = relationship(back_populates="user_contexts")
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "max_user_id", "assistant_config_id", name="uq_user_bot_context"),
+        Index("ix_user_bot_context_lookup", "bot_id", "max_user_id"),
+    )
+
+
+class ConversationMessage(Base):
+    """Stores full conversation history between a MAX user and the AI assistant."""
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    assistant_config_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("assistant_configs.id", ondelete="SET NULL"), nullable=True
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_conversation_lookup", "bot_id", "max_user_id", "created_at"),
+    )

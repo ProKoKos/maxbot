@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Max API base
     max_api_base: str = "https://platform-api.max.ru"
 
+    # Groq AI (free cloud LLM)
+    groq_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

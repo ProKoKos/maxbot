@@ -30,14 +30,18 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import bot.ollama_client as ollama_client
 from bot.buttons import comment_button, discussion_header
 from bot.client import MaxAPIError, MaxClient
 from db.models import (
+    AssistantConfig,
     Bot,
     ChannelGroupPair,
+    ConversationMessage,
     EventLog,
     LogLevel,
     PostLink,
+    UserBotContext,
     VerificationRequest,
     VerificationStatus,
     WelcomeConfig,
@@ -95,6 +99,10 @@ async def _handle_message_created(
     message = update.get("message", {})
     chat = message.get("recipient", {})
     chat_type = chat.get("chat_type", "")
+
+    if chat_type == "dialog":
+        await _handle_dm_message(update, session, client, bot_id)
+        return
 
     if chat_type != "channel":
         # Non-channel message — delete it if the sender is still pending verification
@@ -448,6 +456,7 @@ async def _handle_bot_started(
         f"User {vr.user_name} ({vr.max_user_id}) verified for group {config.group_id} "
         f"(config {config.id})"
     )
+    await _save_user_bot_context(session, bot_id, vr.max_user_id, config)
     await session.commit()
 
     # Delete group verification message to keep the chat clean
@@ -487,6 +496,127 @@ async def _handle_bot_started(
 
     await _send_dm_safe(client, chat_id_for_dm, welcome_text,
                         attachments=[return_button] if return_button else None)
+
+
+# ── AI assistant DM handler ───────────────────────────────────────────────────
+
+async def _handle_dm_message(
+    update: dict,
+    session: AsyncSession,
+    client: MaxClient,
+    bot_id: int | None = None,
+) -> None:
+    """Handle an incoming DM and reply using the AI assistant if configured."""
+    message = update.get("message", {})
+    sender = message.get("sender", {})
+    max_user_id = str(sender.get("user_id", ""))
+    chat = message.get("recipient", {})
+    chat_id = str(chat.get("chat_id", "") or max_user_id)
+    message_body = message.get("body", {})
+    text = (message_body.get("text") or "").strip()
+
+    if not max_user_id or not text or bot_id is None:
+        return
+
+    contexts_result = await session.execute(
+        select(UserBotContext)
+        .where(UserBotContext.bot_id == bot_id, UserBotContext.max_user_id == max_user_id)
+        .options(selectinload(UserBotContext.assistant_config))
+    )
+    contexts = contexts_result.scalars().all()
+    if not contexts:
+        return
+
+    assistant_config: AssistantConfig | None = None
+    for ctx in contexts:
+        if ctx.assistant_config and ctx.assistant_config.is_enabled:
+            assistant_config = ctx.assistant_config
+            break
+    if not assistant_config:
+        return
+
+    history_result = await session.execute(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.max_user_id == max_user_id,
+        )
+        .order_by(ConversationMessage.created_at)
+    )
+    history = history_result.scalars().all()
+
+    messages: list[dict] = []
+    if assistant_config.system_prompt:
+        messages.append({"role": "system", "content": assistant_config.system_prompt})
+    for msg in history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": text})
+
+    session.add(ConversationMessage(
+        bot_id=bot_id,
+        max_user_id=max_user_id,
+        assistant_config_id=assistant_config.id,
+        role="user",
+        content=text,
+    ))
+    await session.commit()
+
+    try:
+        reply = await ollama_client.chat(
+            model=assistant_config.model_name,
+            messages=messages,
+        )
+    except Exception as exc:
+        logger.error("Ollama error for user %s: %s", max_user_id, exc)
+        await _send_dm_safe(client, chat_id, "⚠️ Ошибка AI-ассистента. Попробуйте позже.")
+        return
+
+    session.add(ConversationMessage(
+        bot_id=bot_id,
+        max_user_id=max_user_id,
+        assistant_config_id=assistant_config.id,
+        role="assistant",
+        content=reply,
+    ))
+    await session.commit()
+    await _send_dm_safe(client, chat_id, reply)
+
+
+async def _save_user_bot_context(
+    session: AsyncSession,
+    bot_id: int | None,
+    max_user_id: str,
+    config: WelcomeConfig | ChannelGroupPair,
+) -> None:
+    """Create a UserBotContext linking this user to the AssistantConfig for the verified group."""
+    if bot_id is None:
+        return
+
+    result = await session.execute(
+        select(AssistantConfig).where(
+            AssistantConfig.bot_id == bot_id,
+            AssistantConfig.group_id == config.group_id,
+        )
+    )
+    assistant_config = result.scalar_one_or_none()
+    if not assistant_config:
+        return
+
+    existing = await session.execute(
+        select(UserBotContext).where(
+            UserBotContext.bot_id == bot_id,
+            UserBotContext.max_user_id == max_user_id,
+            UserBotContext.assistant_config_id == assistant_config.id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return
+
+    session.add(UserBotContext(
+        bot_id=bot_id,
+        max_user_id=max_user_id,
+        assistant_config_id=assistant_config.id,
+    ))
 
 
 # ── Delete messages from unverified members ───────────────────────────────────

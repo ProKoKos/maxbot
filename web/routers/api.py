@@ -15,6 +15,7 @@ from bot.client import MaxAPIError, MaxClient
 from bot.crypto import decrypt_token, encrypt_token
 from bot.handlers import handle_update
 from db.models import (
+    AssistantConfig,
     Bot,
     ChannelGroupPair,
     EventLog,
@@ -618,6 +619,135 @@ async def delete_welcome_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Welcome config not found")
+    await session.delete(config)
+    await session.commit()
+
+
+# ── Assistant configs ─────────────────────────────────────────────────────────
+
+class AssistantConfigCreate(BaseModel):
+    bot_id: int
+    group_id: str
+    group_name: str = ""
+    is_enabled: bool = False
+    system_prompt: str | None = None
+    model_name: str = "llama-3.3-70b-versatile"
+
+
+class AssistantConfigUpdate(BaseModel):
+    group_name: str | None = None
+    is_enabled: bool | None = None
+    system_prompt: str | None = None
+    model_name: str | None = None
+
+
+@router.get("/assistant/configs")
+async def list_assistant_configs(current_user: CurrentUser, session: DBSession, _: RateLimit):
+    result = await session.execute(
+        select(AssistantConfig)
+        .where(AssistantConfig.user_id == current_user.id)
+        .order_by(AssistantConfig.created_at.desc())
+    )
+    configs = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "bot_id": c.bot_id,
+            "group_id": c.group_id,
+            "group_name": c.group_name,
+            "is_enabled": c.is_enabled,
+            "system_prompt": c.system_prompt,
+            "model_name": c.model_name,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in configs
+    ]
+
+
+@router.post("/assistant/configs", status_code=201)
+async def create_assistant_config(
+    body: AssistantConfigCreate,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    bot_result = await session.execute(
+        select(Bot).where(Bot.id == body.bot_id, Bot.user_id == current_user.id)
+    )
+    if not bot_result.scalar_one_or_none():
+        raise HTTPException(404, "Bot not found")
+
+    existing = await session.execute(
+        select(AssistantConfig).where(
+            AssistantConfig.bot_id == body.bot_id,
+            AssistantConfig.group_id == body.group_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "An assistant config for this bot+group already exists")
+
+    config = AssistantConfig(
+        user_id=current_user.id,
+        bot_id=body.bot_id,
+        group_id=body.group_id,
+        group_name=body.group_name,
+        is_enabled=body.is_enabled,
+        system_prompt=body.system_prompt or None,
+        model_name=body.model_name,
+    )
+    session.add(config)
+    await session.commit()
+    await session.refresh(config)
+    return {"id": config.id}
+
+
+@router.patch("/assistant/configs/{config_id}")
+async def update_assistant_config(
+    config_id: int,
+    body: AssistantConfigUpdate,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    result = await session.execute(
+        select(AssistantConfig).where(
+            AssistantConfig.id == config_id,
+            AssistantConfig.user_id == current_user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(404, "Assistant config not found")
+
+    if body.group_name is not None:
+        config.group_name = body.group_name
+    if body.is_enabled is not None:
+        config.is_enabled = body.is_enabled
+    if body.system_prompt is not None:
+        config.system_prompt = body.system_prompt or None
+    if body.model_name is not None:
+        config.model_name = body.model_name
+
+    await session.commit()
+    return {"ok": True}
+
+
+@router.delete("/assistant/configs/{config_id}", status_code=204)
+async def delete_assistant_config(
+    config_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    result = await session.execute(
+        select(AssistantConfig).where(
+            AssistantConfig.id == config_id,
+            AssistantConfig.user_id == current_user.id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(404, "Assistant config not found")
     await session.delete(config)
     await session.commit()
 

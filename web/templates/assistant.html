@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+{% block title %}AI-ассистент{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-start justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">🤖 AI-ассистент</h1>
+    <p class="text-sm text-gray-500 mt-1">
+      Бот отвечает на вопросы подписчиков в личных сообщениях с помощью AI.
+      Каждая группа может иметь отдельного ассистента с уникальным промтом.
+    </p>
+  </div>
+  {% if bots_list %}
+  <button onclick="openAddModal()"
+          class="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+    </svg>
+    Добавить
+  </button>
+  {% else %}
+  <a href="/bots"
+     class="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-medium rounded-lg transition-colors">
+    + Сначала добавьте бота
+  </a>
+  {% endif %}
+</div>
+
+{% if not configs_data %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+  <div class="text-5xl mb-4">🤖</div>
+  <h2 class="text-lg font-semibold text-gray-700 mb-2">Нет настроенных ассистентов</h2>
+  <p class="text-sm text-gray-500 max-w-sm mx-auto">
+    Нажмите <strong>«Добавить»</strong>, выберите бота и группу — ассистент будет
+    отвечать подписчикам, которые стартовали бота во время верификации.
+  </p>
+</div>
+{% else %}
+
+<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-6 text-sm text-indigo-800 flex gap-3">
+  <span class="text-xl shrink-0">ℹ️</span>
+  <div>
+    <strong>Как работает:</strong>
+    после прохождения верификации подписчик может написать боту — тот ответит через Ollama.
+    История диалога сохраняется навсегда. Настройте системный промт, чтобы задать ассистенту личность.
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-gray-100 bg-gray-50 text-left">
+        <th class="px-4 py-3 font-medium text-gray-600">Группа</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Бот</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Модель</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Статус</th>
+        <th class="px-4 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for cfg in configs_data %}
+      <tr class="hover:bg-gray-50/50 transition-colors">
+        <td class="px-4 py-3">
+          <div class="font-medium text-gray-800">{{ cfg.group_name or cfg.group_id }}</div>
+          <span class="text-xs text-gray-400">{{ cfg.group_id }}</span>
+        </td>
+        <td class="px-4 py-3">
+          {% if cfg.bot_name %}
+            <span class="text-gray-700">{{ cfg.bot_name }}</span>
+          {% else %}
+            <span class="text-red-400 text-xs">⚠ Нет бота</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3">
+          <span class="font-mono text-xs text-gray-600">{{ cfg.model_name }}</span>
+        </td>
+        <td class="px-4 py-3">
+          {% if cfg.is_enabled %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
+              Включён
+            </span>
+          {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+              Выключен
+            </span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">
+          <div class="inline-flex items-center gap-2">
+            <button onclick="openSettings({{ loop.index0 }})"
+                    class="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+              Настроить
+            </button>
+            <button onclick="deleteConfig({{ cfg.id }}, '{{ cfg.group_name or cfg.group_id }}')"
+                    class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-red-50 text-red-500 hover:text-red-600 border border-red-200 hover:border-red-300 rounded-lg transition-colors">
+              Удалить
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- ── Add Modal ────────────────────────────────────────────────────────────── -->
+<div id="add-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" onclick="closeAddModal()"></div>
+  <div class="relative bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-md">
+    <div class="sticky top-0 bg-white flex items-center justify-between px-6 py-4 border-b border-gray-100">
+      <h2 class="text-base font-semibold text-gray-900">Добавить ассистента</h2>
+      <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <form class="px-6 py-5 space-y-4" onsubmit="saveNewConfig(event)">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Бот <span class="text-red-500">*</span></label>
+        <select id="add-bot-select" required onchange="onAddBotSelected()"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+          <option value="">— выберите бота —</option>
+          {% for bot in bots_list %}
+          <option value="{{ bot.id }}">{{ bot.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div id="add-group-step" class="hidden space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Группа <span class="text-red-500">*</span></label>
+          <div id="groups-loading" class="hidden flex items-center gap-2 py-2 text-sm text-gray-500">
+            <svg class="animate-spin w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            Загрузка групп…
+          </div>
+          <div id="groups-error" class="hidden text-sm text-red-500 py-1"></div>
+          <select id="add-group-select" onchange="onAddGroupSelected()"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+            <option value="">— выберите группу —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 pt-2 border-t border-gray-100">
+        <button type="submit" id="add-submit-btn" disabled
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+          Добавить
+        </button>
+        <button type="button" onclick="closeAddModal()"
+                class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors">
+          Отмена
+        </button>
+        <span id="add-status" class="text-sm ml-auto"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Settings Modal ────────────────────────────────────────────────────────── -->
+<div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" onclick="closeSettings()"></div>
+  <div class="relative bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto">
+    <div class="sticky top-0 bg-white flex items-center justify-between px-6 py-4 border-b border-gray-100 z-10">
+      <div>
+        <h2 class="text-base font-semibold text-gray-900" id="modal-title">Ассистент</h2>
+        <p class="text-xs text-gray-400" id="modal-subtitle"></p>
+      </div>
+      <button onclick="closeSettings()" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <form id="settings-form" class="px-6 py-5 space-y-5" onsubmit="saveSettings(event)">
+      <input type="hidden" id="config-id">
+
+      <!-- Enable toggle -->
+      <div class="flex items-center justify-between py-1">
+        <div>
+          <div class="text-sm font-medium text-gray-800">Включить ассистента</div>
+          <div class="text-xs text-gray-500 mt-0.5">Отвечать на сообщения в DM</div>
+        </div>
+        <button type="button" id="toggle-btn" onclick="toggleEnabled()"
+                class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+          <span id="toggle-knob" class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200"></span>
+        </button>
+      </div>
+
+      <!-- Model name -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Модель Ollama</label>
+        <input type="text" id="field-model" placeholder="llama3.2"
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <p class="text-xs text-gray-400 mt-1">Имя модели, установленной в Ollama (например: llama3.2, mistral)</p>
+      </div>
+
+      <!-- System prompt -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+          Системный промт
+          <span class="font-normal text-gray-400">(личность ассистента)</span>
+        </label>
+        <textarea id="field-prompt" rows="6"
+                  placeholder="Ты — дружелюбный помощник сообщества. Отвечай кратко и по делу."
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"></textarea>
+        <p class="text-xs text-gray-400 mt-1">Задаёт тон, ограничения и контекст для ассистента</p>
+      </div>
+
+      <div class="flex items-center gap-3 pt-3 border-t border-gray-100">
+        <button type="submit"
+                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+          Сохранить
+        </button>
+        <button type="button" onclick="closeSettings()"
+                class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors">
+          Отмена
+        </button>
+        <span id="save-status" class="text-sm ml-auto"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const CONFIGS = {{ configs_data | tojson }};
+let currentEnabled = false;
+
+function openSettings(idx) {
+  const cfg = CONFIGS[idx];
+  document.getElementById('config-id').value = cfg.id;
+  document.getElementById('modal-title').textContent = 'Ассистент: ' + (cfg.group_name || cfg.group_id);
+  document.getElementById('modal-subtitle').textContent = cfg.bot_name ? 'Бот: ' + cfg.bot_name : '';
+  currentEnabled = !!cfg.is_enabled;
+  document.getElementById('field-model').value = cfg.model_name || 'llama-3.3-70b-versatile';
+  document.getElementById('field-prompt').value = cfg.system_prompt || '';
+  _updateToggle();
+  document.getElementById('save-status').textContent = '';
+  document.getElementById('settings-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function toggleEnabled() {
+  currentEnabled = !currentEnabled;
+  _updateToggle();
+}
+
+function _updateToggle() {
+  const btn = document.getElementById('toggle-btn');
+  const knob = document.getElementById('toggle-knob');
+  if (currentEnabled) {
+    btn.classList.remove('bg-gray-200');
+    btn.classList.add('bg-indigo-600');
+    knob.style.transform = 'translateX(20px)';
+  } else {
+    btn.classList.remove('bg-indigo-600');
+    btn.classList.add('bg-gray-200');
+    knob.style.transform = 'translateX(4px)';
+  }
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const configId = document.getElementById('config-id').value;
+  const statusEl = document.getElementById('save-status');
+  statusEl.textContent = 'Сохранение…';
+  statusEl.className = 'text-sm ml-auto text-gray-500';
+
+  const body = {
+    is_enabled: currentEnabled,
+    model_name: document.getElementById('field-model').value.trim() || 'llama-3.3-70b-versatile',
+    system_prompt: document.getElementById('field-prompt').value.trim() || null,
+  };
+
+  try {
+    const resp = await fetch('/api/assistant/configs/' + configId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Ошибка сервера');
+    }
+    statusEl.textContent = '✅ Сохранено';
+    statusEl.className = 'text-sm ml-auto text-green-600 font-medium';
+    setTimeout(() => location.reload(), 900);
+  } catch (err) {
+    statusEl.textContent = '❌ ' + err.message;
+    statusEl.className = 'text-sm ml-auto text-red-600';
+  }
+}
+
+// ── Add Modal ────────────────────────────────────────────────────────────────
+
+function openAddModal() {
+  document.getElementById('add-bot-select').value = '';
+  document.getElementById('add-group-step').classList.add('hidden');
+  document.getElementById('add-group-select').innerHTML = '<option value="">— выберите группу —</option>';
+  document.getElementById('add-status').textContent = '';
+  document.getElementById('add-submit-btn').disabled = true;
+  document.getElementById('groups-error').classList.add('hidden');
+  document.getElementById('groups-loading').classList.add('hidden');
+  document.getElementById('add-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => document.getElementById('add-bot-select').focus(), 50);
+}
+
+function closeAddModal() {
+  document.getElementById('add-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+async function onAddBotSelected() {
+  const botId = document.getElementById('add-bot-select').value;
+  const step = document.getElementById('add-group-step');
+  const loading = document.getElementById('groups-loading');
+  const errEl = document.getElementById('groups-error');
+  const select = document.getElementById('add-group-select');
+  const submitBtn = document.getElementById('add-submit-btn');
+
+  if (!botId) { step.classList.add('hidden'); submitBtn.disabled = true; return; }
+
+  step.classList.remove('hidden');
+  loading.classList.remove('hidden');
+  errEl.classList.add('hidden');
+  select.innerHTML = '<option value="">— загрузка… —</option>';
+  submitBtn.disabled = true;
+
+  try {
+    const resp = await fetch(`/api/bots/${botId}/groups`);
+    if (!resp.ok) throw new Error('Ошибка при загрузке групп');
+    const data = await resp.json();
+    select.innerHTML = '<option value="">— выберите группу —</option>';
+    if (!data.groups || data.groups.length === 0) {
+      errEl.textContent = 'Бот не состоит ни в одной группе. Добавьте его как администратора.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    for (const g of data.groups) {
+      const opt = document.createElement('option');
+      opt.value = g.chat_id;
+      opt.dataset.title = g.title || g.chat_id;
+      opt.textContent = g.title || g.chat_id;
+      select.appendChild(opt);
+    }
+  } catch (err) {
+    errEl.textContent = '❌ ' + err.message;
+    errEl.classList.remove('hidden');
+    select.innerHTML = '<option value="">— ошибка загрузки —</option>';
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+function onAddGroupSelected() {
+  const select = document.getElementById('add-group-select');
+  document.getElementById('add-submit-btn').disabled = !select.value;
+}
+
+async function saveNewConfig(e) {
+  e.preventDefault();
+  const statusEl = document.getElementById('add-status');
+  statusEl.textContent = 'Сохранение…';
+  statusEl.className = 'text-sm ml-auto text-gray-500';
+
+  const botId = parseInt(document.getElementById('add-bot-select').value);
+  const select = document.getElementById('add-group-select');
+  const opt = select.selectedOptions[0];
+
+  if (!opt || !opt.value) {
+    statusEl.textContent = '❌ Выберите группу';
+    statusEl.className = 'text-sm ml-auto text-red-600';
+    return;
+  }
+
+  const body = {
+    bot_id:     botId,
+    group_id:   opt.value,
+    group_name: opt.dataset.title || opt.value,
+  };
+
+  try {
+    const resp = await fetch('/api/assistant/configs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Ошибка сервера');
+    }
+    statusEl.textContent = '✅ Добавлено';
+    statusEl.className = 'text-sm ml-auto text-green-600 font-medium';
+    setTimeout(() => location.reload(), 700);
+  } catch (err) {
+    statusEl.textContent = '❌ ' + err.message;
+    statusEl.className = 'text-sm ml-auto text-red-600';
+  }
+}
+
+async function deleteConfig(configId, groupName) {
+  if (!confirm(`Удалить ассистента для группы «${groupName}»?`)) return;
+  try {
+    const resp = await fetch('/api/assistant/configs/' + configId, { method: 'DELETE' });
+    if (!resp.ok && resp.status !== 204) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Ошибка сервера');
+    }
+    location.reload();
+  } catch (err) {
+    alert('Ошибка: ' + err.message);
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeSettings(); closeAddModal(); }
+});
+</script>
+{% endblock %}

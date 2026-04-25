@@ -372,6 +372,8 @@ class AssistantConfig(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     model_name: Mapped[str] = mapped_column(String(128), nullable=False, default="google/gemma-3-27b-it:free")
+    api_url: Mapped[str] = mapped_column(String(512), nullable=False, default="https://openrouter.ai/api/v1")
+    api_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

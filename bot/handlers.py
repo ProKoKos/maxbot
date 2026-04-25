@@ -580,6 +580,8 @@ async def _handle_dm_message(
         reply = await ollama_client.chat(
             model=assistant_config.model_name,
             messages=messages,
+            api_url=assistant_config.api_url or "",
+            api_key=assistant_config.api_key or "",
         )
     except Exception as exc:
         logger.error("Ollama error for user %s: %s", max_user_id, exc)

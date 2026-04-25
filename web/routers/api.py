@@ -632,6 +632,8 @@ class AssistantConfigCreate(BaseModel):
     is_enabled: bool = False
     system_prompt: str | None = None
     model_name: str = "google/gemma-3-27b-it:free"
+    api_url: str = "https://openrouter.ai/api/v1"
+    api_key: str = ""
 
 
 class AssistantConfigUpdate(BaseModel):
@@ -639,6 +641,8 @@ class AssistantConfigUpdate(BaseModel):
     is_enabled: bool | None = None
     system_prompt: str | None = None
     model_name: str | None = None
+    api_url: str | None = None
+    api_key: str | None = None
 
 
 @router.get("/assistant/configs")
@@ -658,6 +662,8 @@ async def list_assistant_configs(current_user: CurrentUser, session: DBSession, 
             "is_enabled": c.is_enabled,
             "system_prompt": c.system_prompt,
             "model_name": c.model_name,
+            "api_url": c.api_url,
+            "api_key": c.api_key,
             "created_at": c.created_at.isoformat(),
         }
         for c in configs
@@ -694,6 +700,8 @@ async def create_assistant_config(
         is_enabled=body.is_enabled,
         system_prompt=body.system_prompt or None,
         model_name=body.model_name,
+        api_url=body.api_url,
+        api_key=body.api_key,
     )
     session.add(config)
     await session.commit()
@@ -727,6 +735,10 @@ async def update_assistant_config(
         config.system_prompt = body.system_prompt or None
     if body.model_name is not None:
         config.model_name = body.model_name
+    if body.api_url is not None:
+        config.api_url = body.api_url
+    if body.api_key is not None:
+        config.api_key = body.api_key
 
     await session.commit()
     return {"ok": True}

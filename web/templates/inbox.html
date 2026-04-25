@@ -15,6 +15,11 @@
     .group-nav-item.active .label { color:#fff; }
     .avatar-wrap { width:40px; height:40px; border-radius:50%; overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
     .avatar-wrap img { width:100%; height:100%; object-fit:cover; }
+    .resize-handle { width:5px; flex-shrink:0; cursor:col-resize; background:transparent; position:relative; z-index:10; transition:background .15s; }
+    .resize-handle:hover, .resize-handle.dragging { background:#6366f1; }
+    body.col-resizing { cursor:col-resize !important; user-select:none; }
+    body.col-resizing * { cursor:col-resize !important; user-select:none !important; }
+    @media (max-width: 767px) { .resize-handle { display:none; } }
   </style>
 </head>
 <body class="h-full bg-gray-100 overflow-hidden">
@@ -23,7 +28,8 @@
 
   <!-- ── Колонка 1: группы (иконки) ─────────────────────────────────────── -->
   <div id="col-groups"
-       class="col-groups flex flex-col w-16 shrink-0 py-2 items-center transition-all duration-200 overflow-y-auto">
+       class="col-groups flex flex-col shrink-0 py-2 items-center overflow-y-auto"
+       style="width:64px;">
 
     <!-- Все чаты -->
     <button data-group-id="all" data-group-name="Все"
@@ -56,9 +62,13 @@
     </a>
   </div>
 
+  <!-- Resize handle: groups ↔ users -->
+  <div id="resize-handle-1" class="resize-handle hidden md:block" title="Перетащите, чтобы изменить ширину"></div>
+
   <!-- ── Колонка 2: список пользователей ────────────────────────────────── -->
   <div id="col-users"
-       class="flex flex-col w-72 bg-white border-r border-gray-200 shrink-0 transition-all duration-200">
+       class="flex flex-col bg-white border-r border-gray-200 shrink-0"
+       style="width:288px;">
 
     <!-- Заголовок -->
     <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
@@ -87,9 +97,12 @@
     </div>
   </div>
 
+  <!-- Resize handle: users ↔ chat -->
+  <div id="resize-handle-2" class="resize-handle hidden md:block" title="Перетащите, чтобы изменить ширину"></div>
+
   <!-- ── Колонка 3: чат ─────────────────────────────────────────────────── -->
   <div id="col-chat"
-       class="flex-1 flex flex-col bg-gray-50 min-w-0 transition-all duration-200">
+       class="flex-1 flex flex-col bg-gray-50 min-w-0">
 
     <!-- Шапка чата -->
     <div class="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 shrink-0">
@@ -523,6 +536,77 @@ function formatTime(isoStr) {
   }
   return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
+
+// ── Resize колонок ────────────────────────────────────────────────────────
+
+const RESIZE_LIMITS = {
+  groups: { min: 56,  max: 240 },
+  users:  { min: 200, max: 600 },
+};
+
+function loadColumnWidths() {
+  const wg = parseInt(localStorage.getItem('inbox-w-groups') || '', 10);
+  const wu = parseInt(localStorage.getItem('inbox-w-users')  || '', 10);
+  if (wg && wg >= RESIZE_LIMITS.groups.min && wg <= RESIZE_LIMITS.groups.max) {
+    document.getElementById('col-groups').style.width = wg + 'px';
+  }
+  if (wu && wu >= RESIZE_LIMITS.users.min && wu <= RESIZE_LIMITS.users.max) {
+    document.getElementById('col-users').style.width = wu + 'px';
+  }
+}
+
+function setupResize(handleId, colId, storageKey, limits) {
+  const handle = document.getElementById(handleId);
+  const col = document.getElementById(colId);
+  if (!handle || !col) return;
+
+  let startX = 0;
+  let startW = 0;
+
+  function onMove(e) {
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    let w = startW + (x - startX);
+    if (w < limits.min) w = limits.min;
+    if (w > limits.max) w = limits.max;
+    col.style.width = w + 'px';
+  }
+
+  function onUp() {
+    handle.classList.remove('dragging');
+    document.body.classList.remove('col-resizing');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+    localStorage.setItem(storageKey, parseInt(col.style.width, 10));
+  }
+
+  function onDown(e) {
+    if (window.innerWidth < 768) return;
+    e.preventDefault();
+    startX = e.touches ? e.touches[0].clientX : e.clientX;
+    startW = col.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.classList.add('col-resizing');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  }
+
+  handle.addEventListener('mousedown', onDown);
+  handle.addEventListener('touchstart', onDown, { passive: false });
+
+  // Двойной клик — сбросить к дефолту
+  handle.addEventListener('dblclick', () => {
+    col.style.width = (colId === 'col-groups' ? 64 : 288) + 'px';
+    localStorage.removeItem(storageKey);
+  });
+}
+
+loadColumnWidths();
+setupResize('resize-handle-1', 'col-groups', 'inbox-w-groups', RESIZE_LIMITS.groups);
+setupResize('resize-handle-2', 'col-users',  'inbox-w-users',  RESIZE_LIMITS.users);
 
 applyLayout();
 init();

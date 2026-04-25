@@ -51,13 +51,8 @@
     <thead>
       <tr class="border-b border-gray-100 bg-gray-50 text-left">
         <th class="px-4 py-3 font-medium text-gray-600">Группа</th>
-        <th class="px-4 py-3 font-medium text-gray-600">
-          <div>Бот</div>
-        </th>
-        <th class="px-4 py-3 font-medium text-gray-600">
-          <div>Модель</div>
-          <div class="text-xs font-normal text-gray-400">API URL</div>
-        </th>
+        <th class="px-4 py-3 font-medium text-gray-600">Бот</th>
+        <th class="px-4 py-3 font-medium text-gray-600">Модель</th>
         <th class="px-4 py-3 font-medium text-gray-600">Статус</th>
         <th class="px-4 py-3"></th>
       </tr>
@@ -70,8 +65,11 @@
           <span class="text-xs text-gray-400">{{ cfg.group_id }}</span>
         </td>
         <td class="px-4 py-3">
-          {% if cfg.bot_name %}
-            <span class="text-gray-700">{{ cfg.bot_name }}</span>
+          {% if cfg.bot_name or cfg.bot_username %}
+            <div class="font-medium text-gray-800">{{ cfg.bot_name or cfg.bot_username }}</div>
+            {% if cfg.bot_name and cfg.bot_username %}
+              <span class="text-xs text-gray-400">{{ cfg.bot_username }}</span>
+            {% endif %}
           {% else %}
             <span class="text-red-400 text-xs">⚠ Нет бота</span>
           {% endif %}
@@ -271,7 +269,7 @@ function openSettings(idx) {
   const cfg = CONFIGS[idx];
   document.getElementById('config-id').value = cfg.id;
   document.getElementById('modal-title').textContent = 'Ассистент: ' + (cfg.group_name || cfg.group_id);
-  document.getElementById('modal-subtitle').textContent = cfg.bot_name ? 'Бот: ' + cfg.bot_name : '';
+  document.getElementById('modal-subtitle').textContent = (cfg.bot_name || cfg.bot_username) ? 'Бот: ' + (cfg.bot_name || cfg.bot_username) : '';
   currentEnabled = !!cfg.is_enabled;
   document.getElementById('field-model').value = cfg.model_name || 'google/gemma-3-27b-it:free';
   document.getElementById('field-api-url').value = cfg.api_url || 'https://openrouter.ai/api/v1';

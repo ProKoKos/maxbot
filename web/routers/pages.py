@@ -985,8 +985,13 @@ async def assistant_page(request: Request, session: DBSession):
             "group_id": c.group_id,
             "bot_id": c.bot_id,
             "bot_name": (
-                f"@{bot_map[c.bot_id].max_username or bot_map[c.bot_id].name}"
+                bot_map[c.bot_id].name or ""
                 if c.bot_id and c.bot_id in bot_map
+                else ""
+            ),
+            "bot_username": (
+                f"@{bot_map[c.bot_id].max_username}"
+                if c.bot_id and c.bot_id in bot_map and bot_map[c.bot_id].max_username
                 else ""
             ),
             "is_enabled": c.is_enabled,

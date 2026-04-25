@@ -1273,7 +1273,7 @@ async def inbox_users(
             "name": names.get(uid) or f"User {uid}",
             "avatar": stored_avatars.get(uid),
             "unread_count": unread_counts.get(uid, 0),
-            "last_message": m.content[:80] if m else "",
+            "last_message": m.content[:200] if m else "",
             "last_role": m.role if m else "",
             "last_at": r.last_at.isoformat() if r.last_at else None,
         })

@@ -7,11 +7,11 @@
   <link rel="stylesheet" href="/static/tailwind.min.css">
   <style>
     .col-groups { background: #2b2b3b; }
-    .group-nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:background .15s; width:56px; }
+    .group-nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:background .15s; width:calc(100% - 8px); }
     .group-nav-item:hover { background:rgba(255,255,255,.08); }
     .group-nav-item.active { background:rgba(255,255,255,.14); }
     .group-nav-item .icon-wrap { width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:13px; font-weight:700; flex-shrink:0; }
-    .group-nav-item .label { font-size:10px; color:#b0b0c8; line-height:1.2; text-align:center; max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .group-nav-item .label { font-size:10px; color:#b0b0c8; line-height:1.2; text-align:center; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .group-nav-item.active .label { color:#fff; }
     .avatar-wrap { width:40px; height:40px; border-radius:50%; overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
     .avatar-wrap img { width:100%; height:100%; object-fit:cover; }
@@ -45,7 +45,7 @@
       <span class="label">Все</span>
     </button>
 
-    <div id="group-list" class="flex flex-col gap-0.5 items-center w-full px-1 mt-1 flex-1">
+    <div id="group-list" class="flex flex-col gap-0.5 items-center w-full mt-1 flex-1">
       <!-- populated by JS -->
     </div>
 
@@ -256,7 +256,7 @@ function renderUsers(users) {
   }
 
   for (const u of users) {
-    const preview = u.last_message ? truncate(u.last_message, 45) : '';
+    const preview = u.last_message || '';
     const prefix = u.last_role === 'assistant' ? '↩ ' : '';
     const timeStr = u.last_at ? formatTime(u.last_at) : '';
     const avatarHtml = avatarTag(u.name, u.avatar, 40);

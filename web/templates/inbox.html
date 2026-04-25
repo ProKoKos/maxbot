@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Чаты — {{ bot.name }}</title>
+  <link rel="stylesheet" href="/static/tailwind.min.css">
+</head>
+<body class="h-full bg-gray-100 overflow-hidden">
+
+<div class="flex h-full" id="app">
+
+  <!-- ── Колонка 1: группы (иконки) ─────────────────────────────────────── -->
+  <div id="col-groups"
+       class="flex flex-col w-16 bg-indigo-900 shrink-0 py-3 gap-1 items-center transition-all duration-200">
+
+    <!-- Кнопка назад (мобильная) -->
+    <a href="/bots" class="lg:hidden mb-1 text-indigo-300 hover:text-white p-1" title="К ботам">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+
+    <!-- "Все" -->
+    <button data-group-id="all" data-group-name="Все"
+            onclick="selectGroup(this)"
+            title="Все чаты"
+            class="group-btn w-10 h-10 rounded-xl flex items-center justify-center text-lg
+                   bg-indigo-700 text-white font-bold transition-all"
+            title="Все">
+      <span class="text-sm font-bold">Все</span>
+    </button>
+
+    <div id="group-list" class="flex flex-col gap-1 items-center flex-1 overflow-y-auto w-full px-1 mt-1">
+      <!-- populated by JS -->
+    </div>
+
+    <!-- Настройки -->
+    <a href="/bots" title="К списку ботов"
+       class="w-10 h-10 rounded-xl flex items-center justify-center text-indigo-300 hover:text-white hover:bg-indigo-700 transition-all mt-auto">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+    </a>
+  </div>
+
+  <!-- ── Колонка 2: список пользователей ────────────────────────────────── -->
+  <div id="col-users"
+       class="flex flex-col w-72 bg-white border-r border-gray-200 shrink-0 transition-all duration-200">
+
+    <!-- Заголовок -->
+    <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
+      <button id="back-to-groups" onclick="showGroupsOnMobile()"
+              class="hidden lg:hidden text-gray-400 hover:text-gray-600 mr-1 p-0.5">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <h2 id="col-users-title" class="font-semibold text-gray-800 text-sm flex-1">Все чаты</h2>
+      <span id="users-count" class="text-xs text-gray-400"></span>
+    </div>
+
+    <!-- Поиск -->
+    <div class="px-3 py-2 border-b border-gray-100 shrink-0">
+      <input id="user-search" type="text" placeholder="Поиск..."
+             oninput="filterUsers(this.value)"
+             class="w-full px-3 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+    </div>
+
+    <!-- Список -->
+    <div id="user-list" class="flex-1 overflow-y-auto">
+      <div id="users-loading" class="flex items-center justify-center py-10 text-gray-400 text-sm">
+        Загрузка...
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Колонка 3: чат ─────────────────────────────────────────────────── -->
+  <div id="col-chat"
+       class="flex-1 flex flex-col bg-gray-50 min-w-0 transition-all duration-200">
+
+    <!-- Шапка чата -->
+    <div class="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 shrink-0">
+      <button onclick="showUsersOnMobile()"
+              class="text-gray-400 hover:text-gray-600 p-0.5 lg:hidden">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div id="chat-avatar"
+           class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0 hidden">
+      </div>
+      <div class="flex-1 min-w-0">
+        <div id="chat-name" class="font-semibold text-gray-800 text-sm truncate">Выберите чат</div>
+        <div id="chat-sub" class="text-xs text-gray-400 truncate"></div>
+      </div>
+      <button onclick="loadMessages()" id="refresh-btn"
+              class="hidden text-gray-400 hover:text-indigo-600 p-1 rounded transition-colors" title="Обновить">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Сообщения -->
+    <div id="messages-area" class="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div class="flex items-center justify-center h-full text-gray-400 text-sm">
+        Выберите пользователя слева
+      </div>
+    </div>
+
+    <!-- Инпут -->
+    <div id="input-area" class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+      <div class="flex gap-2 items-end">
+        <textarea id="msg-input" rows="1"
+                  placeholder="Написать сообщение..."
+                  onkeydown="handleKey(event)"
+                  oninput="autoResize(this)"
+                  class="flex-1 resize-none px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 max-h-32 overflow-y-auto"
+                  disabled></textarea>
+        <button id="send-btn" onclick="sendMessage()"
+                class="shrink-0 w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                disabled>
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BOT_ID = {{ bot.id }};
+let currentGroupId = 'all';
+let currentGroupName = 'Все';
+let currentUserId = null;
+let currentUserName = '';
+let allUsers = [];
+
+// ── Инициализация ──────────────────────────────────────────────────────────
+
+async function init() {
+  await loadGroups();
+  await loadUsers();
+}
+
+// ── Группы ─────────────────────────────────────────────────────────────────
+
+async function loadGroups() {
+  const res = await fetch(`/api/bots/${BOT_ID}/inbox/groups`);
+  if (!res.ok) return;
+  const groups = await res.json();
+
+  const list = document.getElementById('group-list');
+  list.innerHTML = '';
+
+  // skip "Все" (first item) — already rendered as static button
+  for (const g of groups.slice(1)) {
+    const initials = (g.name || '?').slice(0, 2).toUpperCase();
+    const btn = document.createElement('button');
+    btn.className = 'group-btn w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white bg-indigo-800 hover:bg-indigo-600 transition-all relative';
+    btn.title = g.name;
+    btn.dataset.groupId = g.id;
+    btn.dataset.groupName = g.name;
+    btn.onclick = function() { selectGroup(this); };
+    btn.innerHTML = `<span>${initials}</span>` +
+      (g.count > 0 ? `<span class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center">${g.count > 9 ? '9+' : g.count}</span>` : '');
+    list.appendChild(btn);
+  }
+}
+
+function selectGroup(btn) {
+  document.querySelectorAll('.group-btn').forEach(b => {
+    b.classList.remove('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-indigo-900');
+  });
+  btn.classList.add('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-indigo-900');
+  currentGroupId = btn.dataset.groupId;
+  currentGroupName = btn.dataset.groupName;
+  document.getElementById('col-users-title').textContent = currentGroupName;
+  currentUserId = null;
+  resetChat();
+  loadUsers();
+  showUsersOnMobile();
+}
+
+// ── Пользователи ───────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const loading = document.getElementById('users-loading');
+  const list = document.getElementById('user-list');
+  list.innerHTML = '';
+  if (loading) {
+    loading.style.display = 'flex';
+    list.appendChild(loading);
+  }
+
+  const res = await fetch(`/api/bots/${BOT_ID}/inbox/users?group_id=${currentGroupId}`);
+  if (loading) loading.style.display = 'none';
+  if (!res.ok) {
+    list.innerHTML = '<div class="text-center py-8 text-red-400 text-sm">Ошибка загрузки</div>';
+    return;
+  }
+  allUsers = await res.json();
+  renderUsers(allUsers);
+}
+
+function renderUsers(users) {
+  const list = document.getElementById('user-list');
+  list.innerHTML = '';
+  document.getElementById('users-count').textContent = users.length ? `${users.length}` : '';
+
+  if (!users.length) {
+    list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет диалогов</div>';
+    return;
+  }
+
+  for (const u of users) {
+    const initials = (u.name || '?').slice(0, 2).toUpperCase();
+    const preview = u.last_message ? truncate(u.last_message, 45) : '';
+    const prefix = u.last_role === 'assistant' ? '↩ ' : '';
+    const timeStr = u.last_at ? formatTime(u.last_at) : '';
+
+    const el = document.createElement('button');
+    el.className = `user-item w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-gray-50 ${currentUserId === u.user_id ? 'bg-indigo-50' : ''}`;
+    el.dataset.userId = u.user_id;
+    el.onclick = () => selectUser(u);
+    el.innerHTML = `
+      <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0">${initials}</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between">
+          <span class="font-medium text-gray-800 text-sm truncate">${escHtml(u.name)}</span>
+          <span class="text-xs text-gray-400 shrink-0 ml-1">${timeStr}</span>
+        </div>
+        <div class="text-xs text-gray-500 truncate">${prefix}${escHtml(preview)}</div>
+      </div>`;
+    list.appendChild(el);
+  }
+}
+
+function filterUsers(query) {
+  const q = query.toLowerCase();
+  const filtered = q ? allUsers.filter(u => u.name.toLowerCase().includes(q) || u.user_id.includes(q)) : allUsers;
+  renderUsers(filtered);
+}
+
+function selectUser(u) {
+  currentUserId = u.user_id;
+  currentUserName = u.name;
+
+  // подсветка
+  document.querySelectorAll('.user-item').forEach(el => {
+    el.classList.toggle('bg-indigo-50', el.dataset.userId === u.user_id);
+  });
+
+  // шапка чата
+  const initials = (u.name || '?').slice(0, 2).toUpperCase();
+  document.getElementById('chat-avatar').textContent = initials;
+  document.getElementById('chat-avatar').classList.remove('hidden');
+  document.getElementById('chat-name').textContent = u.name;
+  document.getElementById('chat-sub').textContent = `ID: ${u.user_id}`;
+  document.getElementById('refresh-btn').classList.remove('hidden');
+
+  // активировать ввод
+  document.getElementById('msg-input').disabled = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('msg-input').focus();
+
+  loadMessages();
+  showChatOnMobile();
+}
+
+// ── Сообщения ──────────────────────────────────────────────────────────────
+
+async function loadMessages() {
+  if (!currentUserId) return;
+  const area = document.getElementById('messages-area');
+  area.innerHTML = '<div class="flex justify-center py-6 text-gray-400 text-sm">Загрузка...</div>';
+
+  const res = await fetch(`/api/bots/${BOT_ID}/inbox/messages?user_id=${encodeURIComponent(currentUserId)}&group_id=${currentGroupId}`);
+  if (!res.ok) {
+    area.innerHTML = '<div class="flex justify-center py-6 text-red-400 text-sm">Ошибка загрузки</div>';
+    return;
+  }
+  const msgs = await res.json();
+  renderMessages(msgs);
+}
+
+function renderMessages(msgs) {
+  const area = document.getElementById('messages-area');
+  if (!msgs.length) {
+    area.innerHTML = '<div class="flex items-center justify-center h-full text-gray-400 text-sm">Нет сообщений</div>';
+    return;
+  }
+
+  area.innerHTML = '';
+  let lastDate = '';
+
+  for (const m of msgs) {
+    const isBot = m.role === 'assistant';
+    const dt = new Date(m.created_at);
+    const dateStr = dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    if (dateStr !== lastDate) {
+      const sep = document.createElement('div');
+      sep.className = 'flex justify-center my-2';
+      sep.innerHTML = `<span class="text-xs text-gray-400 bg-gray-100 rounded-full px-3 py-0.5">${dateStr}</span>`;
+      area.appendChild(sep);
+      lastDate = dateStr;
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = `flex ${isBot ? 'justify-end' : 'justify-start'}`;
+    const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    bubble.innerHTML = `
+      <div class="max-w-xs sm:max-w-md lg:max-w-lg xl:max-w-xl px-3 py-2 rounded-2xl text-sm shadow-sm
+                  ${isBot ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white text-gray-800 rounded-bl-sm border border-gray-100'}">
+        <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
+        <div class="text-xs mt-1 ${isBot ? 'text-indigo-200' : 'text-gray-400'} text-right">${timeStr}</div>
+      </div>`;
+    area.appendChild(bubble);
+  }
+
+  area.scrollTop = area.scrollHeight;
+}
+
+// ── Отправка ───────────────────────────────────────────────────────────────
+
+async function sendMessage() {
+  if (!currentUserId) return;
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  input.disabled = true;
+
+  try {
+    const res = await fetch(`/api/bots/${BOT_ID}/inbox/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: currentUserId, text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Ошибка отправки: ' + (err.detail || res.statusText));
+      return;
+    }
+    input.value = '';
+    input.style.height = '';
+    await loadMessages();
+    await loadUsers();
+  } finally {
+    btn.disabled = false;
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = '';
+  el.style.height = Math.min(el.scrollHeight, 128) + 'px';
+}
+
+function resetChat() {
+  currentUserId = null;
+  currentUserName = '';
+  document.getElementById('chat-avatar').classList.add('hidden');
+  document.getElementById('chat-name').textContent = 'Выберите чат';
+  document.getElementById('chat-sub').textContent = '';
+  document.getElementById('refresh-btn').classList.add('hidden');
+  document.getElementById('msg-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('messages-area').innerHTML =
+    '<div class="flex items-center justify-center h-full text-gray-400 text-sm">Выберите пользователя слева</div>';
+}
+
+// ── Мобильная навигация ────────────────────────────────────────────────────
+// На мобильных показываем только одну колонку за раз
+
+function isMobile() { return window.innerWidth < 768; }
+
+function showGroupsOnMobile() {
+  if (!isMobile()) return;
+  document.getElementById('col-groups').style.display = '';
+  document.getElementById('col-users').style.display = 'none';
+  document.getElementById('col-chat').style.display = 'none';
+}
+
+function showUsersOnMobile() {
+  if (!isMobile()) return;
+  document.getElementById('col-groups').style.display = 'none';
+  document.getElementById('col-users').style.display = '';
+  document.getElementById('col-chat').style.display = 'none';
+}
+
+function showChatOnMobile() {
+  if (!isMobile()) return;
+  document.getElementById('col-groups').style.display = 'none';
+  document.getElementById('col-users').style.display = 'none';
+  document.getElementById('col-chat').style.display = '';
+}
+
+function applyLayout() {
+  const mobile = isMobile();
+  const groups = document.getElementById('col-groups');
+  const users = document.getElementById('col-users');
+  const chat = document.getElementById('col-chat');
+  const backGroups = document.getElementById('back-to-groups');
+
+  if (!mobile) {
+    groups.style.display = '';
+    users.style.display = '';
+    chat.style.display = '';
+    backGroups.classList.add('hidden');
+  } else {
+    backGroups.classList.remove('hidden');
+    // если уже открыт конкретный чат — показываем чат
+    if (currentUserId) {
+      showChatOnMobile();
+    } else {
+      showUsersOnMobile();
+    }
+  }
+}
+
+window.addEventListener('resize', applyLayout);
+
+// ── Утилиты ────────────────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+function formatTime(isoStr) {
+  const dt = new Date(isoStr);
+  const now = new Date();
+  const diff = now - dt;
+  if (diff < 86400000 && dt.getDate() === now.getDate()) {
+    return dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+  return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
+// activate "Все" button on load
+document.querySelector('[data-group-id="all"]').classList.add('ring-2','ring-white','ring-offset-2','ring-offset-indigo-900');
+
+applyLayout();
+init();
+</script>
+
+</body>
+</html>

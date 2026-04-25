@@ -145,6 +145,25 @@ async def bots_page(request: Request, session: DBSession):
     )
 
 
+# ── Bot Inbox ─────────────────────────────────────────────────────────────────
+
+@router.get("/bots/{bot_id}/inbox", response_class=HTMLResponse)
+async def bot_inbox_page(bot_id: int, request: Request, session: DBSession):
+    user = await _require_user(request, session)
+
+    result = await session.execute(
+        select(Bot).where(Bot.id == bot_id, Bot.user_id == user.id)
+    )
+    bot = result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(404, "Bot not found")
+
+    return templates.TemplateResponse(
+        "inbox.html",
+        {"request": request, "user": user, "bot": bot},
+    )
+
+
 # ── Pairs management ──────────────────────────────────────────────────────────
 
 @router.get("/pairs", response_class=HTMLResponse)

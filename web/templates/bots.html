@@ -54,6 +54,10 @@
               class="text-xs px-2.5 py-1 rounded border border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600 transition-colors">
         Редактировать
       </button>
+      <a href="/bots/{{ bot.id }}/inbox" target="_blank"
+         class="text-xs px-2.5 py-1 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors">
+        Чаты
+      </a>
       <button onclick="deleteBot({{ bot.id }})"
               class="ml-auto text-xs px-2.5 py-1 rounded border border-red-100 text-red-500 hover:bg-red-50 transition-colors">
         Удалить

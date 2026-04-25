@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func as sqlfunc, select
 
 from bot.client import MaxAPIError, MaxClient
 from bot.crypto import decrypt_token, encrypt_token
@@ -18,12 +18,14 @@ from db.models import (
     AssistantConfig,
     Bot,
     ChannelGroupPair,
+    ConversationMessage,
     EventLog,
     LogLevel,
     PostStatus,
     ScheduledPost,
     Subscription,
     User,
+    VerificationRequest,
     WelcomeConfig,
 )
 from shared.config import get_settings
@@ -997,5 +999,192 @@ async def webhook(bot_id: int, request: Request, session: DBSession):
         except Exception as exc:
             import logging
             logging.getLogger("web.webhook").exception("Webhook handler error: %s", exc)
+
+
+# ── Bot Inbox ─────────────────────────────────────────────────────────────────
+
+async def _require_bot_owner(bot_id: int, user_id: int, session) -> Bot:
+    result = await session.execute(
+        select(Bot).where(Bot.id == bot_id, Bot.user_id == user_id)
+    )
+    bot = result.scalar_one_or_none()
+    if not bot:
+        raise HTTPException(404, "Bot not found")
+    return bot
+
+
+@router.get("/bots/{bot_id}/inbox/groups")
+async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
+    await _require_bot_owner(bot_id, current_user.id, session)
+
+    configs_result = await session.execute(
+        select(AssistantConfig).where(AssistantConfig.bot_id == bot_id)
+    )
+    configs = configs_result.scalars().all()
+
+    counts_result = await session.execute(
+        select(
+            ConversationMessage.assistant_config_id,
+            sqlfunc.count(ConversationMessage.id).label("cnt"),
+        )
+        .where(ConversationMessage.bot_id == bot_id)
+        .group_by(ConversationMessage.assistant_config_id)
+    )
+    counts = {row.assistant_config_id: row.cnt for row in counts_result}
+    total_count = sum(counts.values())
+
+    groups = [{"id": "all", "name": "Все", "count": total_count}]
+    for cfg in configs:
+        groups.append({
+            "id": cfg.id,
+            "name": cfg.group_name or f"Группа {cfg.group_id}",
+            "count": counts.get(cfg.id, 0),
+        })
+    return groups
+
+
+@router.get("/bots/{bot_id}/inbox/users")
+async def inbox_users(
+    bot_id: int,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+    group_id: str = "all",
+):
+    await _require_bot_owner(bot_id, current_user.id, session)
+
+    q = select(
+        ConversationMessage.max_user_id,
+        sqlfunc.max(ConversationMessage.created_at).label("last_at"),
+    ).where(ConversationMessage.bot_id == bot_id)
+
+    if group_id != "all":
+        try:
+            config_id = int(group_id)
+        except ValueError:
+            raise HTTPException(400, "invalid group_id")
+        q = q.where(ConversationMessage.assistant_config_id == config_id)
+
+    q = q.group_by(ConversationMessage.max_user_id).order_by(sqlfunc.max(ConversationMessage.created_at).desc())
+
+    rows = (await session.execute(q)).all()
+    if not rows:
+        return []
+
+    user_ids = [r.max_user_id for r in rows]
+
+    # last message content per user
+    last_msg_result = await session.execute(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.max_user_id.in_(user_ids),
+        )
+        .order_by(ConversationMessage.created_at.desc())
+    )
+    all_msgs = last_msg_result.scalars().all()
+    last_msg: dict[str, ConversationMessage] = {}
+    for m in all_msgs:
+        if m.max_user_id not in last_msg:
+            last_msg[m.max_user_id] = m
+
+    # user names from verification_requests (take the most recent per user)
+    names_result = await session.execute(
+        select(VerificationRequest.max_user_id, VerificationRequest.user_name)
+        .where(VerificationRequest.max_user_id.in_(user_ids))
+        .order_by(VerificationRequest.created_at.desc())
+    )
+    names: dict[str, str] = {}
+    for uid, uname in names_result.all():
+        if uid not in names and uname:
+            names[uid] = uname
+
+    users = []
+    for r in rows:
+        uid = r.max_user_id
+        m = last_msg.get(uid)
+        users.append({
+            "user_id": uid,
+            "name": names.get(uid) or f"User {uid}",
+            "last_message": m.content[:80] if m else "",
+            "last_role": m.role if m else "",
+            "last_at": r.last_at.isoformat() if r.last_at else None,
+        })
+    return users
+
+
+@router.get("/bots/{bot_id}/inbox/messages")
+async def inbox_messages(
+    bot_id: int,
+    user_id: str,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+    group_id: str = "all",
+):
+    await _require_bot_owner(bot_id, current_user.id, session)
+
+    q = select(ConversationMessage).where(
+        ConversationMessage.bot_id == bot_id,
+        ConversationMessage.max_user_id == user_id,
+    )
+    if group_id != "all":
+        try:
+            config_id = int(group_id)
+        except ValueError:
+            raise HTTPException(400, "invalid group_id")
+        q = q.where(ConversationMessage.assistant_config_id == config_id)
+
+    q = q.order_by(ConversationMessage.created_at.asc())
+    result = await session.execute(q)
+    msgs = result.scalars().all()
+    return [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in msgs
+    ]
+
+
+class InboxSendRequest(BaseModel):
+    user_id: str
+    text: str
+    assistant_config_id: int | None = None
+
+
+@router.post("/bots/{bot_id}/inbox/send")
+async def inbox_send(
+    bot_id: int,
+    body: InboxSendRequest,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    bot = await _require_bot_owner(bot_id, current_user.id, session)
+    try:
+        token = decrypt_token(bot.encrypted_token)
+    except ValueError:
+        raise HTTPException(500, "Token decryption failed")
+
+    async with MaxClient(token=token) as client:
+        try:
+            await client.send_message(chat_id=body.user_id, text=body.text, format="markdown")
+        except MaxAPIError as e:
+            raise HTTPException(502, f"Max API error: {e}")
+
+    msg = ConversationMessage(
+        bot_id=bot_id,
+        max_user_id=body.user_id,
+        assistant_config_id=body.assistant_config_id,
+        role="assistant",
+        content=body.text,
+    )
+    session.add(msg)
+    await session.commit()
+    await session.refresh(msg)
+    return {"ok": True, "id": msg.id, "created_at": msg.created_at.isoformat()}
 
     return {"ok": True}

@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.crypto import decrypt_token
 from db.models import AssistantConfig, Bot, ChannelGroupPair, EventLog, PostStatus, ScheduledPost, User, WelcomeConfig
 from db.session import get_async_session
 from shared.config import get_settings
@@ -991,6 +992,8 @@ async def assistant_page(request: Request, session: DBSession):
             "is_enabled": c.is_enabled,
             "system_prompt": c.system_prompt or "",
             "model_name": c.model_name,
+            "api_url": c.api_url or "",
+            "api_key": decrypt_token(c.api_key) if c.api_key else "",
         }
         for c in configs
     ]

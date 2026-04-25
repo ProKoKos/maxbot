@@ -41,7 +41,7 @@
   <span class="text-xl shrink-0">ℹ️</span>
   <div>
     <strong>Как работает:</strong>
-    после прохождения верификации подписчик может написать боту — тот ответит через Ollama.
+    после прохождения верификации подписчик может написать боту — тот ответит через AI-модель по вашему выбору.
     История диалога сохраняется навсегда. Настройте системный промт, чтобы задать ассистенту личность.
   </div>
 </div>
@@ -51,8 +51,13 @@
     <thead>
       <tr class="border-b border-gray-100 bg-gray-50 text-left">
         <th class="px-4 py-3 font-medium text-gray-600">Группа</th>
-        <th class="px-4 py-3 font-medium text-gray-600">Бот</th>
-        <th class="px-4 py-3 font-medium text-gray-600">Модель</th>
+        <th class="px-4 py-3 font-medium text-gray-600">
+          <div>Бот</div>
+        </th>
+        <th class="px-4 py-3 font-medium text-gray-600">
+          <div>Модель</div>
+          <div class="text-xs font-normal text-gray-400">API URL</div>
+        </th>
         <th class="px-4 py-3 font-medium text-gray-600">Статус</th>
         <th class="px-4 py-3"></th>
       </tr>
@@ -72,7 +77,10 @@
           {% endif %}
         </td>
         <td class="px-4 py-3">
-          <span class="font-mono text-xs text-gray-600">{{ cfg.model_name }}</span>
+          <div class="font-mono text-xs text-gray-600">{{ cfg.model_name }}</div>
+          {% if cfg.api_url %}
+            <div class="text-xs text-gray-400 mt-0.5">{{ cfg.api_url }}</div>
+          {% endif %}
         </td>
         <td class="px-4 py-3">
           {% if cfg.is_enabled %}

@@ -511,6 +511,7 @@ async def _handle_dm_message(
     message = update.get("message", {})
     sender = message.get("sender", {})
     max_user_id = str(sender.get("user_id", ""))
+    user_avatar = sender.get("avatar_url") or sender.get("avatar") or sender.get("photo") or None
     chat = message.get("recipient", {})
     chat_id = str(chat.get("chat_id", "") or max_user_id)
     message_body = message.get("body", {})
@@ -572,6 +573,7 @@ async def _handle_dm_message(
         bot_id=bot_id,
         max_user_id=max_user_id,
         chat_id=chat_id,
+        user_avatar=user_avatar,
         assistant_config_id=assistant_config.id,
         role="user",
         content=text,

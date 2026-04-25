@@ -1103,9 +1103,16 @@ async def inbox_users(
     for r in rows:
         uid = r.max_user_id
         m = last_msg.get(uid)
+        # берём аватар из любого сообщения пользователя (user_avatar хранится только на входящих)
+        avatar = None
+        for msg in all_msgs:
+            if msg.max_user_id == uid and msg.user_avatar:
+                avatar = msg.user_avatar
+                break
         users.append({
             "user_id": uid,
             "name": names.get(uid) or f"User {uid}",
+            "avatar": avatar,
             "last_message": m.content[:80] if m else "",
             "last_role": m.role if m else "",
             "last_at": r.last_at.isoformat() if r.last_at else None,

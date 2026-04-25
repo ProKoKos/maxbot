@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Чаты — {{ bot.name }}</title>
   <link rel="stylesheet" href="/static/tailwind.min.css">
+  <style>
+    .col-groups { background: #2b2b3b; }
+    .group-nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:background .15s; width:56px; }
+    .group-nav-item:hover { background:rgba(255,255,255,.08); }
+    .group-nav-item.active { background:rgba(255,255,255,.14); }
+    .group-nav-item .icon-wrap { width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:13px; font-weight:700; flex-shrink:0; }
+    .group-nav-item .label { font-size:10px; color:#b0b0c8; line-height:1.2; text-align:center; max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .group-nav-item.active .label { color:#fff; }
+    .avatar-wrap { width:40px; height:40px; border-radius:50%; overflow:hidden; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .avatar-wrap img { width:100%; height:100%; object-fit:cover; }
+  </style>
 </head>
 <body class="h-full bg-gray-100 overflow-hidden">
 
@@ -12,37 +23,36 @@
 
   <!-- ── Колонка 1: группы (иконки) ─────────────────────────────────────── -->
   <div id="col-groups"
-       class="flex flex-col w-16 bg-indigo-900 shrink-0 py-3 gap-1 items-center transition-all duration-200">
+       class="col-groups flex flex-col w-16 shrink-0 py-2 items-center transition-all duration-200 overflow-y-auto">
 
-    <!-- Кнопка назад (мобильная) -->
-    <a href="/bots" class="lg:hidden mb-1 text-indigo-300 hover:text-white p-1" title="К ботам">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-      </svg>
-    </a>
-
-    <!-- "Все" -->
+    <!-- Все чаты -->
     <button data-group-id="all" data-group-name="Все"
             onclick="selectGroup(this)"
-            title="Все чаты"
-            class="group-btn w-10 h-10 rounded-xl flex items-center justify-center text-lg
-                   bg-indigo-700 text-white font-bold transition-all"
-            title="Все">
-      <span class="text-sm font-bold">Все</span>
+            class="group-btn group-nav-item active mt-1">
+      <div class="icon-wrap" style="background:#4a4a6a;">
+        <!-- chat bubble icon -->
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b0b0c8" stroke-width="1.8">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+      </div>
+      <span class="label">Все</span>
     </button>
 
-    <div id="group-list" class="flex flex-col gap-1 items-center flex-1 overflow-y-auto w-full px-1 mt-1">
+    <div id="group-list" class="flex flex-col gap-0.5 items-center w-full px-1 mt-1 flex-1">
       <!-- populated by JS -->
     </div>
 
     <!-- Настройки -->
-    <a href="/bots" title="К списку ботов"
-       class="w-10 h-10 rounded-xl flex items-center justify-center text-indigo-300 hover:text-white hover:bg-indigo-700 transition-all mt-auto">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-      </svg>
+    <a href="/bots" title="К списку ботов" class="group-nav-item mb-1 mt-auto">
+      <div class="icon-wrap" style="background:#3a3a4f;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0b0c8" stroke-width="1.8">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <span class="label">Боты</span>
     </a>
   </div>
 
@@ -53,7 +63,7 @@
     <!-- Заголовок -->
     <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
       <button id="back-to-groups" onclick="showGroupsOnMobile()"
-              class="hidden lg:hidden text-gray-400 hover:text-gray-600 mr-1 p-0.5">
+              class="hidden text-gray-400 hover:text-gray-600 mr-1 p-0.5">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>
@@ -64,7 +74,7 @@
 
     <!-- Поиск -->
     <div class="px-3 py-2 border-b border-gray-100 shrink-0">
-      <input id="user-search" type="text" placeholder="Поиск..."
+      <input id="user-search" type="text" placeholder="Найти..."
              oninput="filterUsers(this.value)"
              class="w-full px-3 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
     </div>
@@ -84,13 +94,13 @@
     <!-- Шапка чата -->
     <div class="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 shrink-0">
       <button onclick="showUsersOnMobile()"
-              class="text-gray-400 hover:text-gray-600 p-0.5 lg:hidden">
+              class="text-gray-400 hover:text-gray-600 p-0.5 hidden" id="btn-back-users">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>
       </button>
-      <div id="chat-avatar"
-           class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0 hidden">
+      <div id="chat-avatar-wrap" class="avatar-wrap hidden"
+           style="background:#e0e7ff; color:#4338ca; font-weight:700; font-size:14px;">
       </div>
       <div class="flex-1 min-w-0">
         <div id="chat-name" class="font-semibold text-gray-800 text-sm truncate">Выберите чат</div>
@@ -113,7 +123,7 @@
     </div>
 
     <!-- Инпут -->
-    <div id="input-area" class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
+    <div class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
       <div class="flex gap-2 items-end">
         <textarea id="msg-input" rows="1"
                   placeholder="Написать сообщение..."
@@ -141,6 +151,7 @@ let currentGroupId = 'all';
 let currentGroupName = 'Все';
 let currentUserId = null;
 let currentUserName = '';
+let currentUserAvatar = null;
 let allUsers = [];
 
 // ── Инициализация ──────────────────────────────────────────────────────────
@@ -164,26 +175,32 @@ async function loadGroups() {
   for (const g of groups.slice(1)) {
     const initials = (g.name || '?').slice(0, 2).toUpperCase();
     const btn = document.createElement('button');
-    btn.className = 'group-btn w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white bg-indigo-800 hover:bg-indigo-600 transition-all relative';
-    btn.title = g.name;
+    btn.className = 'group-btn group-nav-item';
     btn.dataset.groupId = g.id;
     btn.dataset.groupName = g.name;
     btn.onclick = function() { selectGroup(this); };
-    btn.innerHTML = `<span>${initials}</span>` +
-      (g.count > 0 ? `<span class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center">${g.count > 9 ? '9+' : g.count}</span>` : '');
+
+    const badge = g.count > 0
+      ? `<span style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${g.count > 9 ? '9+' : g.count}</span>`
+      : '';
+
+    btn.innerHTML = `
+      <div style="position:relative;">
+        <div class="icon-wrap" style="background:#4a4a6a;color:#e0e0f0;">${initials}${badge}</div>
+      </div>
+      <span class="label">${escHtml(g.name)}</span>`;
     list.appendChild(btn);
   }
 }
 
 function selectGroup(btn) {
-  document.querySelectorAll('.group-btn').forEach(b => {
-    b.classList.remove('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-indigo-900');
-  });
-  btn.classList.add('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-indigo-900');
+  document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
   currentGroupId = btn.dataset.groupId;
   currentGroupName = btn.dataset.groupName;
   document.getElementById('col-users-title').textContent = currentGroupName;
   currentUserId = null;
+  currentUserAvatar = null;
   resetChat();
   loadUsers();
   showUsersOnMobile();
@@ -192,16 +209,10 @@ function selectGroup(btn) {
 // ── Пользователи ───────────────────────────────────────────────────────────
 
 async function loadUsers() {
-  const loading = document.getElementById('users-loading');
   const list = document.getElementById('user-list');
-  list.innerHTML = '';
-  if (loading) {
-    loading.style.display = 'flex';
-    list.appendChild(loading);
-  }
+  list.innerHTML = '<div class="flex items-center justify-center py-10 text-gray-400 text-sm">Загрузка...</div>';
 
   const res = await fetch(`/api/bots/${BOT_ID}/inbox/users?group_id=${currentGroupId}`);
-  if (loading) loading.style.display = 'none';
   if (!res.ok) {
     list.innerHTML = '<div class="text-center py-8 text-red-400 text-sm">Ошибка загрузки</div>';
     return;
@@ -221,17 +232,18 @@ function renderUsers(users) {
   }
 
   for (const u of users) {
-    const initials = (u.name || '?').slice(0, 2).toUpperCase();
     const preview = u.last_message ? truncate(u.last_message, 45) : '';
     const prefix = u.last_role === 'assistant' ? '↩ ' : '';
     const timeStr = u.last_at ? formatTime(u.last_at) : '';
+    const avatarHtml = avatarTag(u.name, u.avatar, 40);
+    const isActive = currentUserId === u.user_id;
 
     const el = document.createElement('button');
-    el.className = `user-item w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-gray-50 ${currentUserId === u.user_id ? 'bg-indigo-50' : ''}`;
+    el.className = `user-item w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-gray-50 ${isActive ? 'bg-indigo-50' : ''}`;
     el.dataset.userId = u.user_id;
     el.onclick = () => selectUser(u);
     el.innerHTML = `
-      <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0">${initials}</div>
+      ${avatarHtml}
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between">
           <span class="font-medium text-gray-800 text-sm truncate">${escHtml(u.name)}</span>
@@ -252,21 +264,26 @@ function filterUsers(query) {
 function selectUser(u) {
   currentUserId = u.user_id;
   currentUserName = u.name;
+  currentUserAvatar = u.avatar;
 
-  // подсветка
   document.querySelectorAll('.user-item').forEach(el => {
     el.classList.toggle('bg-indigo-50', el.dataset.userId === u.user_id);
   });
 
   // шапка чата
-  const initials = (u.name || '?').slice(0, 2).toUpperCase();
-  document.getElementById('chat-avatar').textContent = initials;
-  document.getElementById('chat-avatar').classList.remove('hidden');
+  const wrap = document.getElementById('chat-avatar-wrap');
+  wrap.classList.remove('hidden');
+  if (u.avatar) {
+    wrap.innerHTML = `<img src="${escHtml(u.avatar)}" alt="" onerror="this.parentNode.innerHTML='${initials(u.name)}'">`;
+  } else {
+    wrap.innerHTML = initials(u.name);
+    wrap.style.background = '#e0e7ff';
+    wrap.style.color = '#4338ca';
+  }
   document.getElementById('chat-name').textContent = u.name;
   document.getElementById('chat-sub').textContent = `ID: ${u.user_id}`;
   document.getElementById('refresh-btn').classList.remove('hidden');
 
-  // активировать ввод
   document.getElementById('msg-input').disabled = false;
   document.getElementById('send-btn').disabled = false;
   document.getElementById('msg-input').focus();
@@ -314,14 +331,25 @@ function renderMessages(msgs) {
     }
 
     const bubble = document.createElement('div');
-    bubble.className = `flex ${isBot ? 'justify-end' : 'justify-start'}`;
+    bubble.className = `flex gap-2 ${isBot ? 'justify-end' : 'justify-start'} items-end`;
     const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    bubble.innerHTML = `
-      <div class="max-w-xs sm:max-w-md lg:max-w-lg xl:max-w-xl px-3 py-2 rounded-2xl text-sm shadow-sm
-                  ${isBot ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white text-gray-800 rounded-bl-sm border border-gray-100'}">
-        <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
-        <div class="text-xs mt-1 ${isBot ? 'text-indigo-200' : 'text-gray-400'} text-right">${timeStr}</div>
-      </div>`;
+
+    if (!isBot) {
+      // показываем маленький аватар слева
+      const av = avatarTag(currentUserName, currentUserAvatar, 28);
+      bubble.innerHTML = `
+        <div class="shrink-0 self-end">${av}</div>
+        <div class="max-w-xs sm:max-w-md lg:max-w-lg px-3 py-2 rounded-2xl rounded-bl-sm text-sm shadow-sm bg-white text-gray-800 border border-gray-100">
+          <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
+          <div class="text-xs mt-1 text-gray-400 text-right">${timeStr}</div>
+        </div>`;
+    } else {
+      bubble.innerHTML = `
+        <div class="max-w-xs sm:max-w-md lg:max-w-lg px-3 py-2 rounded-2xl rounded-br-sm text-sm shadow-sm bg-indigo-600 text-white">
+          <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
+          <div class="text-xs mt-1 text-indigo-200 text-right">${timeStr}</div>
+        </div>`;
+    }
     area.appendChild(bubble);
   }
 
@@ -377,7 +405,8 @@ function autoResize(el) {
 function resetChat() {
   currentUserId = null;
   currentUserName = '';
-  document.getElementById('chat-avatar').classList.add('hidden');
+  currentUserAvatar = null;
+  document.getElementById('chat-avatar-wrap').classList.add('hidden');
   document.getElementById('chat-name').textContent = 'Выберите чат';
   document.getElementById('chat-sub').textContent = '';
   document.getElementById('refresh-btn').classList.add('hidden');
@@ -388,7 +417,6 @@ function resetChat() {
 }
 
 // ── Мобильная навигация ────────────────────────────────────────────────────
-// На мобильных показываем только одну колонку за раз
 
 function isMobile() { return window.innerWidth < 768; }
 
@@ -404,6 +432,7 @@ function showUsersOnMobile() {
   document.getElementById('col-groups').style.display = 'none';
   document.getElementById('col-users').style.display = '';
   document.getElementById('col-chat').style.display = 'none';
+  document.getElementById('back-to-groups').classList.remove('hidden');
 }
 
 function showChatOnMobile() {
@@ -411,28 +440,20 @@ function showChatOnMobile() {
   document.getElementById('col-groups').style.display = 'none';
   document.getElementById('col-users').style.display = 'none';
   document.getElementById('col-chat').style.display = '';
+  document.getElementById('btn-back-users').classList.remove('hidden');
 }
 
 function applyLayout() {
   const mobile = isMobile();
-  const groups = document.getElementById('col-groups');
-  const users = document.getElementById('col-users');
-  const chat = document.getElementById('col-chat');
-  const backGroups = document.getElementById('back-to-groups');
-
   if (!mobile) {
-    groups.style.display = '';
-    users.style.display = '';
-    chat.style.display = '';
-    backGroups.classList.add('hidden');
+    document.getElementById('col-groups').style.display = '';
+    document.getElementById('col-users').style.display = '';
+    document.getElementById('col-chat').style.display = '';
+    document.getElementById('back-to-groups').classList.add('hidden');
+    document.getElementById('btn-back-users').classList.add('hidden');
   } else {
-    backGroups.classList.remove('hidden');
-    // если уже открыт конкретный чат — показываем чат
-    if (currentUserId) {
-      showChatOnMobile();
-    } else {
-      showUsersOnMobile();
-    }
+    if (currentUserId) showChatOnMobile();
+    else showUsersOnMobile();
   }
 }
 
@@ -448,18 +469,39 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
+function initials(name) {
+  return String(name || '?').slice(0, 2).toUpperCase();
+}
+
+// Генерируем стабильный цвет фона по строке
+const AVATAR_COLORS = ['#5b7fd4','#7b5ea7','#4a9e7f','#c0713a','#a84b6a','#4a7a9b','#7a6b4a'];
+function avatarColor(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
+
+function avatarTag(name, url, size) {
+  const s = size || 40;
+  const bg = avatarColor(name || '');
+  if (url) {
+    return `<div class="avatar-wrap" style="width:${s}px;height:${s}px;flex-shrink:0;">
+      <img src="${escHtml(url)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+           onerror="this.style.display='none';this.nextSibling.style.display='flex';">
+      <div style="display:none;width:100%;height:100%;background:${bg};color:#fff;font-weight:700;font-size:${Math.round(s*0.35)}px;align-items:center;justify-content:center;border-radius:50%;">${initials(name)}</div>
+    </div>`;
+  }
+  return `<div style="width:${s}px;height:${s}px;border-radius:50%;background:${bg};color:#fff;font-weight:700;font-size:${Math.round(s*0.35)}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials(name)}</div>`;
+}
+
 function formatTime(isoStr) {
   const dt = new Date(isoStr);
   const now = new Date();
-  const diff = now - dt;
-  if (diff < 86400000 && dt.getDate() === now.getDate()) {
+  if (dt.getDate() === now.getDate() && now - dt < 86400000) {
     return dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   }
   return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
-
-// activate "Все" button on load
-document.querySelector('[data-group-id="all"]').classList.add('ring-2','ring-white','ring-offset-2','ring-offset-indigo-900');
 
 applyLayout();
 init();

@@ -424,6 +424,7 @@ class ConversationMessage(Base):
     )
     max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     chat_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_avatar: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     assistant_config_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("assistant_configs.id", ondelete="SET NULL"), nullable=True
     )

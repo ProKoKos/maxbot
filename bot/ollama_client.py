@@ -1,5 +1,4 @@
 import httpx
-from shared.config import get_settings
 
 _DEFAULT_URL = "https://openrouter.ai/api/v1"
 
@@ -12,12 +11,11 @@ async def chat(
     api_key: str = "",
 ) -> str:
     """Send a chat request to an OpenAI-compatible API and return the assistant's reply."""
-    base_url = (api_url or _DEFAULT_URL).rstrip("/")
-    key = api_key or get_settings().openrouter_api_key
-    if not key:
-        raise RuntimeError("API key is not configured")
+    if not api_key:
+        raise RuntimeError("API ключ не настроен для этого ассистента")
 
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    base_url = (api_url or _DEFAULT_URL).rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if "openrouter.ai" in base_url:
         headers["HTTP-Referer"] = "https://maxbot.teplobyte.ru"
 

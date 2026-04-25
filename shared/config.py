@@ -42,8 +42,6 @@ class Settings(BaseSettings):
     # Max API base
     max_api_base: str = "https://platform-api.max.ru"
 
-    # OpenRouter AI (free cloud LLM)
-    openrouter_api_key: str = ""
 
 
 @lru_cache

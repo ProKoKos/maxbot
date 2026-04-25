@@ -663,7 +663,7 @@ async def list_assistant_configs(current_user: CurrentUser, session: DBSession, 
             "system_prompt": c.system_prompt,
             "model_name": c.model_name,
             "api_url": c.api_url,
-            "api_key_set": bool(c.api_key),
+            "api_key": decrypt_token(c.api_key) if c.api_key else "",
             "created_at": c.created_at.isoformat(),
         }
         for c in configs

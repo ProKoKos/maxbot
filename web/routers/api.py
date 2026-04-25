@@ -1015,7 +1015,7 @@ async def _require_bot_owner(bot_id: int, user_id: int, session) -> Bot:
 
 @router.get("/bots/{bot_id}/inbox/groups")
 async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
-    await _require_bot_owner(bot_id, current_user.id, session)
+    bot = await _require_bot_owner(bot_id, current_user.id, session)
 
     configs_result = await session.execute(
         select(AssistantConfig).where(AssistantConfig.bot_id == bot_id)
@@ -1033,12 +1033,31 @@ async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSessio
     counts = {row.assistant_config_id: row.cnt for row in counts_result}
     total_count = sum(counts.values())
 
-    groups = [{"id": "all", "name": "Все", "count": total_count}]
+    # Подтягиваем иконки групп через MAX API
+    chat_icons: dict[str, str | None] = {}
+    try:
+        token = decrypt_token(bot.encrypted_token)
+        async with MaxClient(token=token) as client:
+            import asyncio
+            async def _fetch_icon(group_id: str) -> tuple[str, str | None]:
+                try:
+                    data = await client.get_chat(group_id)
+                    icon = (data.get("icon") or {}).get("url") or data.get("avatar_url") or None
+                    return group_id, icon
+                except MaxAPIError:
+                    return group_id, None
+            results = await asyncio.gather(*[_fetch_icon(cfg.group_id) for cfg in configs])
+            chat_icons = dict(results)
+    except Exception:
+        pass
+
+    groups = [{"id": "all", "name": "Все", "count": total_count, "icon": None}]
     for cfg in configs:
         groups.append({
             "id": cfg.id,
             "name": cfg.group_name or f"Группа {cfg.group_id}",
             "count": counts.get(cfg.id, 0),
+            "icon": chat_icons.get(cfg.group_id),
         })
     return groups
 
@@ -1051,7 +1070,7 @@ async def inbox_users(
     _: RateLimit,
     group_id: str = "all",
 ):
-    await _require_bot_owner(bot_id, current_user.id, session)
+    bot = await _require_bot_owner(bot_id, current_user.id, session)
 
     q = select(
         ConversationMessage.max_user_id,
@@ -1099,20 +1118,56 @@ async def inbox_users(
         if uid not in names and uname:
             names[uid] = uname
 
+    # берём аватар из сохранённых сообщений; если нет — идём в MAX API
+    stored_avatars: dict[str, str | None] = {}
+    first_user_msg: dict[str, ConversationMessage] = {}
+    for msg in reversed(all_msgs):  # reversed → самое раннее сообщение окажется в dict последним
+        if msg.max_user_id not in stored_avatars:
+            stored_avatars[msg.max_user_id] = None
+        if msg.user_avatar:
+            stored_avatars[msg.max_user_id] = msg.user_avatar
+        if msg.role == "user":
+            first_user_msg[msg.max_user_id] = msg
+
+    missing = [uid for uid in user_ids if not stored_avatars.get(uid)]
+    if missing:
+        try:
+            import asyncio
+            token = decrypt_token(bot.encrypted_token)
+            async with MaxClient(token=token) as client:
+                async def _fetch_avatar(uid: str) -> tuple[str, str | None]:
+                    try:
+                        data = await client.get_user(uid)
+                        url = (
+                            data.get("avatar_url")
+                            or data.get("photo_url")
+                            or (data.get("photo") or {}).get("url")
+                            or None
+                        )
+                        return uid, url
+                    except MaxAPIError:
+                        return uid, None
+                fetched = dict(await asyncio.gather(*[_fetch_avatar(uid) for uid in missing]))
+
+            # кешируем в БД на первом сообщении пользователя, где avatar ещё не стоит
+            for uid, url in fetched.items():
+                if url:
+                    stored_avatars[uid] = url
+                    msg_to_update = first_user_msg.get(uid)
+                    if msg_to_update and not msg_to_update.user_avatar:
+                        msg_to_update.user_avatar = url
+            await session.commit()
+        except Exception:
+            pass
+
     users = []
     for r in rows:
         uid = r.max_user_id
         m = last_msg.get(uid)
-        # берём аватар из любого сообщения пользователя (user_avatar хранится только на входящих)
-        avatar = None
-        for msg in all_msgs:
-            if msg.max_user_id == uid and msg.user_avatar:
-                avatar = msg.user_avatar
-                break
         users.append({
             "user_id": uid,
             "name": names.get(uid) or f"User {uid}",
-            "avatar": avatar,
+            "avatar": stored_avatars.get(uid),
             "last_message": m.content[:80] if m else "",
             "last_role": m.role if m else "",
             "last_at": r.last_at.isoformat() if r.last_at else None,

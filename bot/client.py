@@ -152,6 +152,11 @@ class MaxClient:
     async def get_chats(self) -> dict:
         return await self._request("GET", "/chats")
 
+    # ── Users ─────────────────────────────────────────────────────────────────
+
+    async def get_user(self, user_id: str) -> dict:
+        return await self._request("GET", f"/users/{user_id}")
+
     # ── Members ───────────────────────────────────────────────────────────────
 
     async def kick_member(self, chat_id: str, user_id: str) -> dict:

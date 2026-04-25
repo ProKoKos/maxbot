@@ -189,6 +189,14 @@ async function loadGroups() {
         <div class="icon-wrap" style="background:#4a4a6a;color:#e0e0f0;">${initials}${badge}</div>
       </div>
       <span class="label">${escHtml(g.name)}</span>`;
+    if (g.icon) {
+      const wrap = btn.querySelector('.icon-wrap');
+      const img = document.createElement('img');
+      img.src = g.icon;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
+      img.onerror = function() { this.remove(); };
+      wrap.prepend(img);
+    }
     list.appendChild(btn);
   }
 }

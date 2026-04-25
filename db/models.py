@@ -396,17 +396,18 @@ class UserBotContext(Base):
         ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
     )
     max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    assistant_config_id: Mapped[int] = mapped_column(
-        ForeignKey("assistant_configs.id", ondelete="CASCADE"), nullable=False
+    group_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    assistant_config_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("assistant_configs.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    assistant_config: Mapped["AssistantConfig"] = relationship(back_populates="user_contexts")
+    assistant_config: Mapped[Optional["AssistantConfig"]] = relationship(back_populates="user_contexts")
 
     __table_args__ = (
-        UniqueConstraint("bot_id", "max_user_id", "assistant_config_id", name="uq_user_bot_context"),
+        UniqueConstraint("bot_id", "max_user_id", "group_id", name="uq_user_bot_context"),
         Index("ix_user_bot_context_lookup", "bot_id", "max_user_id"),
     )
 

@@ -532,6 +532,21 @@ async def _handle_dm_message(
         if ctx.assistant_config and ctx.assistant_config.is_enabled:
             assistant_config = ctx.assistant_config
             break
+        elif ctx.assistant_config_id is None and ctx.group_id:
+            # Config was deleted and FK set to NULL — re-link if a new one exists
+            relink = await session.execute(
+                select(AssistantConfig).where(
+                    AssistantConfig.bot_id == bot_id,
+                    AssistantConfig.group_id == ctx.group_id,
+                    AssistantConfig.is_enabled.is_(True),
+                )
+            )
+            cfg = relink.scalar_one_or_none()
+            if cfg:
+                ctx.assistant_config_id = cfg.id
+                await session.commit()
+                assistant_config = cfg
+                break
     if not assistant_config:
         return
 
@@ -606,15 +621,18 @@ async def _save_user_bot_context(
         select(UserBotContext).where(
             UserBotContext.bot_id == bot_id,
             UserBotContext.max_user_id == max_user_id,
-            UserBotContext.assistant_config_id == assistant_config.id,
+            UserBotContext.group_id == config.group_id,
         )
     )
-    if existing.scalar_one_or_none():
+    ctx = existing.scalar_one_or_none()
+    if ctx:
+        ctx.assistant_config_id = assistant_config.id
         return
 
     session.add(UserBotContext(
         bot_id=bot_id,
         max_user_id=max_user_id,
+        group_id=config.group_id,
         assistant_config_id=assistant_config.id,
     ))
 

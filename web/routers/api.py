@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func as sqlfunc, select
+from sqlalchemy import func as sqlfunc, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from bot.client import MaxAPIError, MaxClient
 from bot.crypto import decrypt_token, encrypt_token
@@ -20,6 +21,7 @@ from db.models import (
     ChannelGroupPair,
     ConversationMessage,
     EventLog,
+    InboxReadStatus,
     LogLevel,
     PostStatus,
     ScheduledPost,
@@ -1022,23 +1024,56 @@ async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSessio
     )
     configs = configs_result.scalars().all()
 
-    counts_result = await session.execute(
+    # Кол-во пользователей с непрочитанными сообщениями per group
+    unread_per_config_result = await session.execute(
         select(
             ConversationMessage.assistant_config_id,
-            sqlfunc.count(ConversationMessage.id).label("cnt"),
+            sqlfunc.count(sqlfunc.distinct(ConversationMessage.max_user_id)).label("unread_users"),
         )
-        .where(ConversationMessage.bot_id == bot_id)
+        .outerjoin(
+            InboxReadStatus,
+            (InboxReadStatus.bot_id == ConversationMessage.bot_id) &
+            (InboxReadStatus.max_user_id == ConversationMessage.max_user_id),
+        )
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.role == "user",
+            or_(
+                InboxReadStatus.last_read_at.is_(None),
+                ConversationMessage.created_at > InboxReadStatus.last_read_at,
+            ),
+        )
         .group_by(ConversationMessage.assistant_config_id)
     )
-    counts = {row.assistant_config_id: row.cnt for row in counts_result}
-    total_count = sum(counts.values())
+    unread_by_config: dict[int | None, int] = {
+        row.assistant_config_id: row.unread_users for row in unread_per_config_result
+    }
+
+    # Общее кол-во distinct пользователей с непрочитанными (для кнопки "Все")
+    total_unread_result = await session.execute(
+        select(sqlfunc.count(sqlfunc.distinct(ConversationMessage.max_user_id)))
+        .outerjoin(
+            InboxReadStatus,
+            (InboxReadStatus.bot_id == ConversationMessage.bot_id) &
+            (InboxReadStatus.max_user_id == ConversationMessage.max_user_id),
+        )
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.role == "user",
+            or_(
+                InboxReadStatus.last_read_at.is_(None),
+                ConversationMessage.created_at > InboxReadStatus.last_read_at,
+            ),
+        )
+    )
+    total_unread = total_unread_result.scalar() or 0
 
     # Подтягиваем иконки групп через MAX API
     chat_icons: dict[str, str | None] = {}
     try:
+        import asyncio
         token = decrypt_token(bot.encrypted_token)
         async with MaxClient(token=token) as client:
-            import asyncio
             async def _fetch_icon(group_id: str) -> tuple[str, str | None]:
                 try:
                     data = await client.get_chat(group_id)
@@ -1051,12 +1086,12 @@ async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSessio
     except Exception:
         pass
 
-    groups = [{"id": "all", "name": "Все", "count": total_count, "icon": None}]
+    groups = [{"id": "all", "name": "Все", "count": total_unread, "icon": None}]
     for cfg in configs:
         groups.append({
             "id": cfg.id,
             "name": cfg.group_name or f"Группа {cfg.group_id}",
-            "count": counts.get(cfg.id, 0),
+            "count": unread_by_config.get(cfg.id, 0),
             "icon": chat_icons.get(cfg.group_id),
         })
     return groups
@@ -1136,6 +1171,7 @@ async def inbox_users(
             token = decrypt_token(bot.encrypted_token)
             async with MaxClient(token=token) as client:
                 async def _fetch_avatar(uid: str) -> tuple[str, str | None]:
+                    # Сначала пробуем /users/{uid}
                     try:
                         data = await client.get_user(uid)
                         url = (
@@ -1144,9 +1180,21 @@ async def inbox_users(
                             or (data.get("photo") or {}).get("url")
                             or None
                         )
-                        return uid, url
+                        if url:
+                            return uid, url
                     except MaxAPIError:
-                        return uid, None
+                        pass
+                    # Фолбэк: иконка DM-чата пользователя — равна аватару в MAX
+                    fmsg = first_user_msg.get(uid)
+                    if fmsg and fmsg.chat_id:
+                        try:
+                            data = await client.get_chat(fmsg.chat_id)
+                            url = (data.get("icon") or {}).get("url") or None
+                            return uid, url
+                        except MaxAPIError:
+                            pass
+                    return uid, None
+
                 fetched = dict(await asyncio.gather(*[_fetch_avatar(uid) for uid in missing]))
 
             # кешируем в БД на первом сообщении пользователя, где avatar ещё не стоит
@@ -1160,6 +1208,30 @@ async def inbox_users(
         except Exception:
             pass
 
+    # Кол-во непрочитанных сообщений per user
+    unread_result = await session.execute(
+        select(
+            ConversationMessage.max_user_id,
+            sqlfunc.count(ConversationMessage.id).label("unread_count"),
+        )
+        .outerjoin(
+            InboxReadStatus,
+            (InboxReadStatus.bot_id == ConversationMessage.bot_id) &
+            (InboxReadStatus.max_user_id == ConversationMessage.max_user_id),
+        )
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.max_user_id.in_(user_ids),
+            ConversationMessage.role == "user",
+            or_(
+                InboxReadStatus.last_read_at.is_(None),
+                ConversationMessage.created_at > InboxReadStatus.last_read_at,
+            ),
+        )
+        .group_by(ConversationMessage.max_user_id)
+    )
+    unread_counts: dict[str, int] = {row.max_user_id: row.unread_count for row in unread_result}
+
     users = []
     for r in rows:
         uid = r.max_user_id
@@ -1168,6 +1240,7 @@ async def inbox_users(
             "user_id": uid,
             "name": names.get(uid) or f"User {uid}",
             "avatar": stored_avatars.get(uid),
+            "unread_count": unread_counts.get(uid, 0),
             "last_message": m.content[:80] if m else "",
             "last_role": m.role if m else "",
             "last_at": r.last_at.isoformat() if r.last_at else None,
@@ -1200,6 +1273,20 @@ async def inbox_messages(
     q = q.order_by(ConversationMessage.created_at.asc())
     result = await session.execute(q)
     msgs = result.scalars().all()
+
+    # Помечаем как прочитанные
+    now = datetime.now(timezone.utc)
+    stmt = pg_insert(InboxReadStatus).values(
+        bot_id=bot_id,
+        max_user_id=user_id,
+        last_read_at=now,
+    ).on_conflict_do_update(
+        constraint="uq_inbox_read_bot_user",
+        set_={"last_read_at": now},
+    )
+    await session.execute(stmt)
+    await session.commit()
+
     return [
         {
             "id": m.id,

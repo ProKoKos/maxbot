@@ -437,3 +437,20 @@ class ConversationMessage(Base):
     __table_args__ = (
         Index("ix_conversation_lookup", "bot_id", "max_user_id", "created_at"),
     )
+
+
+class InboxReadStatus(Base):
+    """Когда владелец инбокса последний раз открывал переписку с конкретным пользователем."""
+    __tablename__ = "inbox_read_status"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "max_user_id", name="uq_inbox_read_bot_user"),
+        Index("ix_inbox_read_bot_user", "bot_id", "max_user_id"),
+    )

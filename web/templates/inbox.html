@@ -184,18 +184,21 @@ async function loadGroups() {
       ? `<span style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${g.count > 9 ? '9+' : g.count}</span>`
       : '';
 
+    const iconContent = g.icon
+      ? `<img src="${escHtml(g.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+      : initials;
+
     btn.innerHTML = `
       <div style="position:relative;">
-        <div class="icon-wrap" style="background:#4a4a6a;color:#e0e0f0;">${initials}${badge}</div>
+        <div class="icon-wrap" style="background:#4a4a6a;color:#e0e0f0;">${iconContent}</div>
+        ${badge}
       </div>
       <span class="label">${escHtml(g.name)}</span>`;
+
     if (g.icon) {
-      const wrap = btn.querySelector('.icon-wrap');
-      const img = document.createElement('img');
-      img.src = g.icon;
-      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
-      img.onerror = function() { this.remove(); };
-      wrap.prepend(img);
+      btn.querySelector('.icon-wrap img').onerror = function() {
+        this.parentNode.textContent = initials;
+      };
     }
     list.appendChild(btn);
   }
@@ -245,6 +248,9 @@ function renderUsers(users) {
     const timeStr = u.last_at ? formatTime(u.last_at) : '';
     const avatarHtml = avatarTag(u.name, u.avatar, 40);
     const isActive = currentUserId === u.user_id;
+    const unread = (!isActive && u.unread_count > 0)
+      ? `<span class="unread-badge" style="background:#ef4444;color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;flex-shrink:0;">${u.unread_count > 99 ? '99+' : u.unread_count}</span>`
+      : '';
 
     const el = document.createElement('button');
     el.className = `user-item w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-gray-50 ${isActive ? 'bg-indigo-50' : ''}`;
@@ -253,9 +259,12 @@ function renderUsers(users) {
     el.innerHTML = `
       ${avatarHtml}
       <div class="flex-1 min-w-0">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-1">
           <span class="font-medium text-gray-800 text-sm truncate">${escHtml(u.name)}</span>
-          <span class="text-xs text-gray-400 shrink-0 ml-1">${timeStr}</span>
+          <div class="flex items-center gap-1 shrink-0">
+            ${unread}
+            <span class="text-xs text-gray-400">${timeStr}</span>
+          </div>
         </div>
         <div class="text-xs text-gray-500 truncate">${prefix}${escHtml(preview)}</div>
       </div>`;
@@ -276,6 +285,10 @@ function selectUser(u) {
 
   document.querySelectorAll('.user-item').forEach(el => {
     el.classList.toggle('bg-indigo-50', el.dataset.userId === u.user_id);
+    // Убираем значок непрочитанных у выбранного пользователя сразу
+    if (el.dataset.userId === u.user_id) {
+      el.querySelectorAll('.unread-badge').forEach(b => b.remove());
+    }
   });
 
   // шапка чата

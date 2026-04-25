@@ -663,7 +663,7 @@ async def list_assistant_configs(current_user: CurrentUser, session: DBSession, 
             "system_prompt": c.system_prompt,
             "model_name": c.model_name,
             "api_url": c.api_url,
-            "api_key": c.api_key,
+            "api_key_set": bool(c.api_key),
             "created_at": c.created_at.isoformat(),
         }
         for c in configs
@@ -701,7 +701,7 @@ async def create_assistant_config(
         system_prompt=body.system_prompt or None,
         model_name=body.model_name,
         api_url=body.api_url,
-        api_key=body.api_key,
+        api_key=encrypt_token(body.api_key) if body.api_key else "",
     )
     session.add(config)
     await session.commit()
@@ -738,7 +738,7 @@ async def update_assistant_config(
     if body.api_url is not None:
         config.api_url = body.api_url
     if body.api_key is not None:
-        config.api_key = body.api_key
+        config.api_key = encrypt_token(body.api_key) if body.api_key else ""
 
     await session.commit()
     return {"ok": True}

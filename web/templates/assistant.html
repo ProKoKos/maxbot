@@ -256,7 +256,8 @@ function openSettings(idx) {
   currentEnabled = !!cfg.is_enabled;
   document.getElementById('field-model').value = cfg.model_name || 'google/gemma-3-27b-it:free';
   document.getElementById('field-api-url').value = cfg.api_url || 'https://openrouter.ai/api/v1';
-  document.getElementById('field-api-key').value = cfg.api_key || '';
+  document.getElementById('field-api-key').value = '';
+  document.getElementById('field-api-key').placeholder = cfg.api_key_set ? '••••••••  (оставьте пустым, чтобы не менять)' : 'Оставьте пустым для глобального ключа';
   document.getElementById('field-prompt').value = cfg.system_prompt || '';
   _updateToggle();
   document.getElementById('save-status').textContent = '';
@@ -299,7 +300,7 @@ async function saveSettings(e) {
     is_enabled: currentEnabled,
     model_name: document.getElementById('field-model').value.trim() || 'google/gemma-3-27b-it:free',
     api_url: document.getElementById('field-api-url').value.trim() || 'https://openrouter.ai/api/v1',
-    api_key: document.getElementById('field-api-key').value,
+    api_key: document.getElementById('field-api-key').value || null,
     system_prompt: document.getElementById('field-prompt').value.trim() || null,
   };
 

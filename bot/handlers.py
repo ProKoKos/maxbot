@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 import bot.ollama_client as ollama_client
 from bot.buttons import comment_button, discussion_header
 from bot.client import MaxAPIError, MaxClient
+from bot.crypto import decrypt_token
 from db.models import (
     AssistantConfig,
     Bot,
@@ -577,11 +578,17 @@ async def _handle_dm_message(
     await session.commit()
 
     try:
+        plain_key = ""
+        if assistant_config.api_key:
+            try:
+                plain_key = decrypt_token(assistant_config.api_key)
+            except ValueError:
+                pass
         reply = await ollama_client.chat(
             model=assistant_config.model_name,
             messages=messages,
             api_url=assistant_config.api_url or "",
-            api_key=assistant_config.api_key or "",
+            api_key=plain_key,
         )
     except Exception as exc:
         logger.error("Ollama error for user %s: %s", max_user_id, exc)

@@ -1,8 +1,14 @@
 """
-JWT authentication utilities.
-- create_access_token / verify_token for API
-- get_current_user dependency for FastAPI routes
-- password hashing with bcrypt
+JWT-аутентификация и работа с паролями.
+
+Используется одновременно API (``Authorization: Bearer ...``) и UI
+(cookie ``access_token``, выставляется при /login). Зависимости:
+
+  • :func:`get_current_user` — для JSON-эндпоинтов, бросает 401;
+  • :func:`get_current_user_ui` — для HTML-страниц, бросает 302 → /login.
+
+Пароли хешируются bcrypt'ом через passlib (deprecated="auto" — passlib
+сам пометит старые схемы при необходимости миграции).
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,19 +27,26 @@ settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# ── Passwords ─────────────────────────────────────────────────────────────────
+# ── Пароли (bcrypt) ───────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
+    """Bcrypt-хеш пароля для хранения в users.hashed_password."""
     return pwd_context.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    """Сравнение plain-пароля с bcrypt-хешем (constant-time)."""
     return pwd_context.verify(plain, hashed)
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
+    """Подписывает payload JWT'ом с настроенным секретом и алгоритмом.
+
+    В data обязательно должен быть ключ ``sub`` (subject) — мы используем
+    туда email пользователя. Срок жизни — из настроек, если не задан.
+    """
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
@@ -43,19 +56,21 @@ def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = 
 
 
 def decode_token(token: str) -> dict[str, Any]:
+    """Декодирует JWT, проверяя подпись и срок. Бросает JWTError на ошибках."""
     return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
 
 
-# ── FastAPI dependencies ───────────────────────────────────────────────────────
+# ── FastAPI-зависимости ───────────────────────────────────────────────────────
 
 async def get_current_user(
     request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> User:
-    """
-    Extracts user from:
-    1. Authorization: Bearer <token> header  (API clients)
-    2. access_token cookie                   (browser UI)
+    """Извлекает текущего пользователя из заголовка или cookie.
+
+    Приоритет: ``Authorization: Bearer <token>`` (для API-клиентов),
+    затем cookie ``access_token`` (для UI-форм). Пустой/невалидный токен
+    или удалённый/неактивный юзер → 401.
     """
     token: str | None = None
 
@@ -95,12 +110,17 @@ async def get_current_user_ui(
     request: Request,
     session: AsyncSession = Depends(get_async_session),
 ) -> User:
-    """Same as get_current_user but redirects to login page instead of 401."""
+    """То же, что :func:`get_current_user`, но при ошибке шлёт 302 → /login.
+
+    Для HTML-страниц 401-JSON выглядел бы странно — пользователь должен
+    увидеть форму логина, а не голый JSON-ответ.
+    """
     from fastapi.responses import RedirectResponse
 
     try:
         return await get_current_user(request, session)
     except HTTPException:
-        # Store intended URL in cookie so login can redirect back
+        # 302 с заголовком Location обработается в exception_handler
+        # в web/main.py и превратится в нормальный редирект.
         response = RedirectResponse(url="/login", status_code=302)
         raise HTTPException(status_code=302, headers={"location": "/login"})

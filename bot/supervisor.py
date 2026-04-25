@@ -1,13 +1,23 @@
 """
-BotSupervisor — dynamic multi-bot polling manager.
+BotSupervisor — динамический менеджер polling-задач для нескольких ботов.
 
-Every REFRESH_INTERVAL seconds it queries the DB for active bots and:
-  - Starts a new polling task for bots that appeared.
-  - Cancels the task for bots that were deactivated or deleted.
-  - Restarts tasks that crashed (with exponential backoff).
+Каждые ``REFRESH_INTERVAL`` секунд ходит в БД и сверяет «активные боты»
+с текущим набором запущенных asyncio-задач:
 
-Each bot runs an independent asyncio Task with its own MaxClient and
-PollingMarker, so they don't share state or affect each other.
+  • появился новый бот / включили существующий → создаём asyncio.Task
+    с отдельным MaxClient и PollingMarker;
+  • бот выключен / удалён → отменяем его задачу через task.cancel();
+  • задача упала с исключением → перезапускаем с exponential backoff
+    (5 → 10 → 20 → … → 300 сек), сбрасывая счётчик при удачной авторизации.
+
+Изоляция: каждая задача держит отдельный httpx-клиент и работает с
+собственным маркером long-polling. Один сбойный бот не повлияет
+на остальных.
+
+Если /me возвращает ошибку (например, токен отозвали в MAX), бот
+автоматически помечается ``is_active=False`` через
+:meth:`_deactivate_bot` — иначе supervisor бесконечно пытался бы его
+переподнять.
 """
 import asyncio
 import logging
@@ -17,6 +27,12 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 
 from bot.client import MaxAPIError, MaxClient
+from bot.constants import (
+    SUPERVISOR_POLL_TIMEOUT as POLL_TIMEOUT,
+    SUPERVISOR_REFRESH_INTERVAL as REFRESH_INTERVAL,
+    SUPERVISOR_RETRY_BASE as RETRY_BASE,
+    SUPERVISOR_RETRY_MAX as RETRY_MAX,
+)
 from bot.crypto import decrypt_token
 from bot.handlers import handle_update
 from db.models import Bot, PollingMarker
@@ -24,72 +40,80 @@ from db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
-REFRESH_INTERVAL = 30   # seconds between DB polls for new/removed bots
-POLL_TIMEOUT = 25       # Max API long-poll hang duration
-RETRY_BASE = 5          # base seconds for backoff on error
-RETRY_MAX = 300         # cap at 5 minutes
-
 
 @dataclass
 class ManagedBot:
+    """Состояние одного бота, обслуживаемого супервайзером."""
     bot_id: int
     user_id: int
-    token: str                        # decrypted plain token
+    # Расшифрованный (plain) токен — держим в памяти, чтобы не дешифровать
+    # на каждой итерации long-polling.
+    token: str
     task: asyncio.Task | None = None
+    # Счётчик подряд идущих неудач для exponential backoff.
+    # Сбрасывается в 0 при удачной авторизации /me.
     retry_count: int = 0
     last_error: str = ""
 
 
 class BotSupervisor:
-    """Manages a pool of per-bot polling tasks, synced with the DB."""
+    """Пул polling-задач, синхронизируемый с БД."""
 
     def __init__(self) -> None:
-        self._bots: dict[int, ManagedBot] = {}   # bot_id → ManagedBot
+        # bot_id → ManagedBot. Источник истины «что у нас сейчас крутится».
+        self._bots: dict[int, ManagedBot] = {}
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # ── Публичный API ─────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """Main supervisor loop. Runs forever."""
+        """Бесконечный цикл супервайзера. Вызывается из bot/main.py."""
         logger.info("Supervisor started — refresh interval: %ds", REFRESH_INTERVAL)
         while True:
             try:
                 await self._refresh()
             except Exception as exc:
+                # Ошибка в _refresh не должна валить весь сервис —
+                # просто залогируем и пойдём на следующую итерацию.
                 logger.exception("Supervisor refresh error: %s", exc)
             await asyncio.sleep(REFRESH_INTERVAL)
 
-    # ── Internals ──────────────────────────────────────────────────────────────
+    # ── Внутренняя логика ─────────────────────────────────────────────────────
 
     async def _refresh(self) -> None:
-        """Sync running tasks with active bots in DB."""
+        """Синхронизирует запущенные задачи со списком активных ботов в БД."""
         active_bots = await self._fetch_active_bots()
         active_ids = {b["id"] for b in active_bots}
         running_ids = set(self._bots.keys())
 
-        # ── Start new bots ────────────────────────────────────────────────────
+        # 1. Стартуем новые: появились в БД, но ещё не запущены.
         for bot_row in active_bots:
             bot_id = bot_row["id"]
             if bot_id not in running_ids:
                 await self._start_bot(bot_row)
 
-        # ── Stop removed/deactivated bots ─────────────────────────────────────
+        # 2. Гасим ушедшие: задача крутится, но в БД бот уже не активен.
         for bot_id in running_ids - active_ids:
             await self._stop_bot(bot_id)
 
-        # ── Restart crashed tasks ─────────────────────────────────────────────
+        # 3. Перезапускаем упавшие: задача завершилась с исключением.
+        # Cancellation идёт мимо этой ветки (task.cancelled() == True).
         for bot_id, managed in list(self._bots.items()):
             if managed.task and managed.task.done():
                 exc = managed.task.exception() if not managed.task.cancelled() else None
                 if exc:
                     managed.last_error = str(exc)
                     managed.retry_count += 1
+                    # Exponential backoff: 5, 10, 20, 40 … но не дольше RETRY_MAX.
+                    # Спим внутри _refresh, чтобы блокировать только один бот,
+                    # а не весь supervisor (это компромисс — простота важнее).
                     delay = min(RETRY_BASE * (2 ** (managed.retry_count - 1)), RETRY_MAX)
                     logger.warning(
                         "Bot %d task crashed (attempt %d), restarting in %ds: %s",
                         bot_id, managed.retry_count, delay, exc,
                     )
                     await asyncio.sleep(delay)
-                # Re-fetch token (might have changed)
+                # Токен мог поменяться (юзер обновил его через UI), пока
+                # задача падала и перезапускалась — берём актуальный.
                 bot_rows = [b for b in active_bots if b["id"] == bot_id]
                 if bot_rows:
                     managed.token = bot_rows[0]["token"]
@@ -121,30 +145,37 @@ class BotSupervisor:
                 pass
         logger.info("Stopped polling task for bot %d", bot_id)
 
-    # ── Per-bot polling loop ───────────────────────────────────────────────────
+    # ── Long-polling-цикл одного бота ────────────────────────────────────────
 
     async def _poll_loop(self, managed: ManagedBot) -> None:
-        """
-        Long-polling loop for a single bot.
-        Runs until cancelled (supervisor stops it) or raises (supervisor restarts it).
+        """Бесконечный long-polling-цикл одного бота.
+
+        Завершается при cancel'е (тогда supervisor его не перезапускает)
+        или при необработанном исключении (тогда supervisor увидит
+        task.done() с exception и перезапустит с backoff).
         """
         bot_id = managed.bot_id
         logger.info("Bot %d: polling loop started", bot_id)
 
         async with MaxClient(token=managed.token) as client:
-            # Verify token on first connect
+            # Первое действие — /me. Это и проверка валидности токена,
+            # и обновление кеша max_user_id/max_username (нужны для
+            # deep-link'ов и проверки «бот не верифицирует сам себя»).
             try:
                 me = await client.get_me()
                 logger.info(
                     "Bot %d authenticated: %s (max_id=%s)",
                     bot_id, me.get("name"), me.get("user_id"),
                 )
-                # Update cached Max identity in DB
                 await self._update_bot_identity(bot_id, me)
-                managed.retry_count = 0  # reset on successful auth
+                # Авторизация удалась — сбрасываем backoff, чтобы при
+                # следующем падении мы снова начинали с RETRY_BASE.
+                managed.retry_count = 0
             except MaxAPIError as exc:
+                # Битый/отозванный токен. Бесконечно перезапускать
+                # такого бота — пустая трата ресурсов: помечаем
+                # is_active=False, юзер увидит ошибку в UI.
                 logger.error("Bot %d: auth failed — %s. Task will not retry bad tokens.", bot_id, exc)
-                # Mark bot as inactive so supervisor stops retrying
                 await self._deactivate_bot(bot_id, reason=str(exc))
                 return
 
@@ -156,8 +187,12 @@ class BotSupervisor:
                         timeout=POLL_TIMEOUT,
                     )
                 except asyncio.CancelledError:
-                    raise  # propagate cancellation
+                    # Cancel — сигнал «остановись», не обрабатываем как ошибку.
+                    raise
                 except MaxAPIError as exc:
+                    # Сетевые/API-ошибки: ждём RETRY_BASE и продолжаем.
+                    # Не выходим из цикла — иначе заработает supervisor backoff
+                    # и мы потеряем уже валидную авторизацию /me.
                     logger.error("Bot %d: get_updates error — %s", bot_id, exc)
                     await asyncio.sleep(RETRY_BASE)
                     continue
@@ -165,6 +200,9 @@ class BotSupervisor:
                 updates = data.get("updates", [])
                 new_marker = data.get("marker")
 
+                # Один общий session на пакет апдейтов: handlers внутри
+                # сами решают, когда коммитить. Если упадёт один update,
+                # logger.exception зафиксирует, остальные — продолжатся.
                 if updates:
                     async with AsyncSessionLocal() as session:
                         for upd in updates:
@@ -175,13 +213,20 @@ class BotSupervisor:
                                     "Bot %d: error handling update %s: %s", bot_id, upd, exc
                                 )
 
+                # Маркер = курсор в стриме событий MAX. Сохраняем только
+                # если изменился — иначе лишние UPDATE.
                 if new_marker and new_marker != marker:
                     await self._save_marker(bot_id, new_marker)
 
-    # ── DB helpers ─────────────────────────────────────────────────────────────
+    # ── Помощники работы с БД ────────────────────────────────────────────────
 
     async def _fetch_active_bots(self) -> list[dict]:
-        """Return list of {id, user_id, name, token (decrypted)} for all active bots."""
+        """Возвращает список активных ботов с уже расшифрованными токенами.
+
+        Боты с битым encrypted_token (например, после смены ENCRYPTION_KEY)
+        пропускаем — иначе supervisor бы упорно перезапускал безнадёжный
+        бот в ошибку. Юзер должен пересохранить токен через UI.
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(Bot).where(Bot.is_active == True)  # noqa: E712
@@ -237,7 +282,7 @@ class BotSupervisor:
                 await session.commit()
 
     async def _deactivate_bot(self, bot_id: int, reason: str) -> None:
-        """Disable a bot in DB so the supervisor won't keep retrying it."""
+        """Помечает бота неактивным в БД, чтобы supervisor больше его не запускал."""
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(Bot).where(Bot.id == bot_id))
             bot = result.scalar_one_or_none()

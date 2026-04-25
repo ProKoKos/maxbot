@@ -1,11 +1,19 @@
 """
-Bot service entry point.
+Точка входа сервиса bot (отдельный контейнер docker-compose).
 
-Modes:
-  polling (default) — BotSupervisor manages one asyncio Task per active bot.
-                      New bots are picked up every REFRESH_INTERVAL seconds.
-  webhook           — Registers all active bots' webhook URLs with Max API,
-                      then keeps running to re-register on restarts.
+Поддерживаются два режима, выбираются переменной окружения BOT_MODE:
+
+  polling (по умолчанию)
+      :class:`bot.supervisor.BotSupervisor` поднимает по asyncio.Task на
+      каждый активный бот. Новые/удалённые боты подхватываются каждые
+      ``SUPERVISOR_REFRESH_INTERVAL`` секунд (см. ``bot/constants.py``).
+      Для большинства инсталляций — именно этот режим.
+
+  webhook
+      Регистрирует у MAX API webhook-URL для всех активных ботов
+      и периодически (раз в час) переподтверждает регистрацию,
+      чтобы пережить рестарты MAX-серверов. Сами апдейты приходят
+      на ``/api/webhook/{bot_id}`` сервиса web (см. web/routers/api.py).
 """
 import asyncio
 import logging
@@ -30,12 +38,17 @@ settings = get_settings()
 
 
 async def _ensure_schema() -> None:
+    """Подстраховка от случая «alembic не применил миграции».
+
+    Создаёт недостающие таблицы (но не модифицирует существующие).
+    Основная схема — через alembic upgrade head в сервисе migrate.
+    """
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def _register_webhooks() -> None:
-    """Register webhook URL for every active bot (webhook mode)."""
+    """Регистрирует webhook-URL у всех активных ботов (только режим webhook)."""
     if not settings.webhook_url:
         logger.error("BOT_MODE=webhook but WEBHOOK_URL is not set.")
         sys.exit(1)
@@ -68,7 +81,9 @@ async def main() -> None:
     if mode == "webhook":
         await _register_webhooks()
         logger.info("Webhook mode: all bots registered. Web service handles incoming events.")
-        # Keep alive so docker doesn't restart; re-register periodically
+        # Перерегистрация раз в час — на случай, если MAX обнулил
+        # подписку (например, после своего рестарта). Цикл также не даёт
+        # docker считать процесс «завершённым» и рестартовать контейнер.
         while True:
             await asyncio.sleep(3600)
             await _register_webhooks()

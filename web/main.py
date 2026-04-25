@@ -1,6 +1,14 @@
 """
-FastAPI web application entry point.
-Serves both the Jinja2 HTML UI and the JSON REST API.
+Точка входа web-сервиса (контейнер web в docker-compose).
+
+Один FastAPI-процесс отдаёт два слоя:
+  • HTML-страницы на Jinja2 — роутер ``web.routers.pages``;
+  • JSON REST API — роутер ``web.routers.api``.
+
+Оба слоя авторизуются по одному и тому же JWT (cookie ``access_token``).
+При первом запуске сидится администратор из ``ADMIN_EMAIL`` /
+``ADMIN_PASSWORD`` в .env. Если БД ещё пустая (alembic не успел или
+не применил миграции), таблицы создаются «в догон» через ``create_all``.
 """
 import logging
 import sys
@@ -43,11 +51,15 @@ app.include_router(api.router)
 
 @app.on_event("startup")
 async def startup() -> None:
-    # Ensure tables exist (alembic runs separately, this is a safety net)
+    """Подстраховка схемы и создание первого админа."""
+    # Подстраховка: alembic запускается отдельным сервисом ``migrate``.
+    # Если он не отработал, ``create_all`` хотя бы поднимет недостающие
+    # таблицы — лучше работа с дефолтной схемой, чем 500 на каждом запросе.
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Seed admin user if not exists
+    # Сидим первого админа, если в БД ещё нет пользователя с таким email.
+    # Без этого на свежей установке некем было бы войти.
     async with AsyncSessionLocal() as session:
         from sqlalchemy import select
 
@@ -67,8 +79,13 @@ async def startup() -> None:
             logger.info("Admin user created: %s", settings.admin_email)
 
 
-# ── Exception handlers ────────────────────────────────────────────────────────
+# ── Обработчики исключений ────────────────────────────────────────────────────
 
 @app.exception_handler(302)
 async def redirect_handler(request: Request, exc):
+    """Превращает HTTPException(status_code=302) в полноценный редирект.
+
+    Используется в зависимостях вроде get_current_user_ui, которым нужно
+    отправить юзера на /login без ручного return RedirectResponse.
+    """
     return RedirectResponse(url=exc.headers["location"], status_code=302)

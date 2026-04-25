@@ -1,3 +1,27 @@
+"""
+ORM-модели проекта (SQLAlchemy 2.0, async).
+
+Группы таблиц:
+  • Users / Subscription — SaaS-уровень: пользователь и его лимиты;
+  • Bot / PollingMarker  — MAX-боты, их зашифрованные токены и
+    long-polling-курсоры;
+  • ChannelGroupPair / PostLink — пары канал↔группа + лог дублирования;
+  • WelcomeConfig + VerificationRequest — captcha-gate;
+  • ScheduledPost — отложенный автопостинг;
+  • EventLog — журнал событий для UI;
+  • AssistantConfig + UserBotContext + ConversationMessage +
+    InboxReadStatus — AI-ассистент и веб-инбокс.
+
+Принципы:
+  • datetimes хранятся timezone-aware (``DateTime(timezone=True)``);
+  • Enum'ы — без native enum в БД (``native_enum=False``), хранятся как
+    VARCHAR — это упрощает добавление новых значений без миграций типов;
+  • ondelete=CASCADE применяется только там, где удаление родителя
+    действительно делает дочерние записи бессмысленными
+    (PollingMarker, VerificationRequest, ConversationMessage и т.п.);
+  • ondelete=SET NULL — когда дочерние записи нужно сохранить как историю
+    даже после удаления родителя (EventLog.bot_id, ChannelGroupPair.bot_id).
+"""
 import enum
 from datetime import datetime
 from typing import Optional
@@ -19,38 +43,52 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
+    """База ORM-моделей. Все модели наследуются отсюда."""
     pass
 
 
-# ─── Enums ────────────────────────────────────────────────────────────────────
+# ─── Перечисления (хранятся как VARCHAR, а не PostgreSQL enum) ───────────────
+# native_enum=False во всех колонках Enum: добавление нового значения
+# не требует миграции ALTER TYPE … ADD VALUE.
 
 class Plan(str, enum.Enum):
+    """Тарифный план пользователя."""
     free = "free"
     pro = "pro"
 
 
 class LogLevel(str, enum.Enum):
+    """Уровни записей в EventLog. Используются как фильтр в UI."""
     info = "info"
     warning = "warning"
     error = "error"
 
 
 class PostStatus(str, enum.Enum):
+    """Жизненный цикл отложенного поста: pending → sent | failed."""
     pending = "pending"
     sent = "sent"
     failed = "failed"
 
 
 class VerificationStatus(str, enum.Enum):
+    """Статус captcha-gate-запроса.
+
+    pending  — ждём, пока пользователь нажмёт кнопку;
+    verified — пользователь прошёл проверку;
+    kicked   — scheduler выгнал по таймауту;
+    expired  — таймаут истёк, но кик не настроен (просто запрос «протух»).
+    """
     pending = "pending"
     verified = "verified"
     kicked = "kicked"
     expired = "expired"
 
 
-# ─── Users & SaaS ─────────────────────────────────────────────────────────────
+# ─── Пользователи и SaaS-уровень ─────────────────────────────────────────────
 
 class User(Base):
+    """Пользователь сервиса (владелец ботов и пар)."""
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -70,12 +108,20 @@ class User(Base):
 
 
 class Subscription(Base):
+    """Тарифный план пользователя и его лимиты.
+
+    1:1 к User. Лимиты хранятся как JSON-строка в Text — это позволяет
+    добавлять новые ключи без миграций. Формат::
+
+        {"max_bots": 3, "max_pairs": 5, "max_posts_per_day": 20}
+
+    Сейчас лимиты не енфорсятся в коде (TODO для биллинга).
+    """
     __tablename__ = "subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     plan: Mapped[Plan] = mapped_column(Enum(Plan, native_enum=False), default=Plan.free)
-    # JSON-encoded limits: {"max_bots": 3, "max_pairs": 5, "max_posts_per_day": 20}
     limits: Mapped[str] = mapped_column(
         Text, default='{"max_bots": 1, "max_pairs": 1, "max_posts_per_day": 10}'
     )
@@ -86,12 +132,16 @@ class Subscription(Base):
     user: Mapped["User"] = relationship(back_populates="subscription")
 
 
-# ─── Bots ─────────────────────────────────────────────────────────────────────
+# ─── Боты ────────────────────────────────────────────────────────────────────
 
 class Bot(Base):
-    """
-    A Max messenger bot owned by a user.
-    Token is stored encrypted (Fernet) — decrypt with bot.crypto.decrypt_token().
+    """Бот мессенджера MAX, привязанный к пользователю.
+
+    Токен лежит зашифрованным Fernet'ом в ``encrypted_token`` —
+    расшифровка через :func:`bot.crypto.decrypt_token`.
+    Поля ``max_user_id`` / ``max_username`` кешируются из MAX /me
+    при первом успешном подключении в supervisor'е и используются
+    для построения deep-link'ов и проверок «бот это или нет».
     """
     __tablename__ = "bots"
 
@@ -118,17 +168,32 @@ class Bot(Base):
         back_populates="bot", uselist=False, cascade="all, delete-orphan"
     )
 
+    __table_args__ = (
+        # Списочный API /api/bots: WHERE user_id = current_user.id.
+        Index("ix_bot_user", "user_id"),
+    )
 
-# ─── Bot core ─────────────────────────────────────────────────────────────────
+
+# ─── Ядро: пары канал↔группа ─────────────────────────────────────────────────
 
 class ChannelGroupPair(Base):
-    """Maps a Max channel → discussion group, operated by a specific Bot."""
+    """Связка «канал MAX → группа обсуждений», обслуживаемая одним ботом.
+
+    Содержит как настройки канала/группы (id, name, link), так и параметры
+    captcha-gate-верификации (verification_*) — последние используются,
+    когда для группы НЕ задан отдельный WelcomeConfig (legacy-путь).
+
+    Удаление бота не должно сносить пару (там может быть история постов
+    и автопостинг). Поэтому ondelete=SET NULL: пара остаётся, но
+    становится «неоперациональной» (см. ``is_operational``).
+    """
 
     __tablename__ = "channel_group_pairs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    # Nullable: when bot is deleted, bot_id is SET NULL and pair is auto-disabled
+    # SET NULL — чтобы пара пережила удаление бота. UI показывает её как
+    # «без бота» и автоматически обесцвечивает enabled (см. is_operational).
     bot_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("bots.id", ondelete="SET NULL"), nullable=True
     )
@@ -143,15 +208,17 @@ class ChannelGroupPair(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    # ── Verification (captcha-gate) ───────────────────────────────────────────
+    # ── Настройки captcha-gate-верификации (legacy путь) ─────────────────────
+    # Используются, только если для группы НЕТ отдельного WelcomeConfig
+    # (тот имеет приоритет — см. CLAUDE.md и handlers._handle_member_added).
     verification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     verification_timeout_min: Mapped[int] = mapped_column(Integer, default=10)
-    # None → use built-in default template
+    # None → берём DEFAULT_VERIFY_MSG из bot/constants.py.
     verification_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     verification_button_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     verification_kick: Mapped[bool] = mapped_column(Boolean, default=True)
     verification_notify_success: Mapped[bool] = mapped_column(Boolean, default=True)
-    # None → don't send DM
+    # None → welcome-DM не шлём вовсе.
     verification_welcome_dm: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="pairs")
@@ -167,17 +234,29 @@ class ChannelGroupPair(Base):
     )
 
     __table_args__ = (
+        # Композитный индекс под основной запрос handler'а:
+        # «найди активную пару для этого канала и этого бота».
         Index("ix_pair_bot_channel", "bot_id", "channel_id", "enabled"),
+        # Списочный API /api/pairs: WHERE user_id = current_user.id.
+        Index("ix_pair_user", "user_id"),
     )
 
     @property
     def is_operational(self) -> bool:
-        """A pair is operational only when it has an active bot and is enabled."""
+        """Пара считается «работающей» только если она enabled и привязан бот."""
         return self.enabled and self.bot_id is not None
 
 
 class PostLink(Base):
-    """Tracks channel post → discussion group message mapping."""
+    """Связь «пост в канале → сообщение в группе обсуждений».
+
+    Главное назначение — дедупликация: при поступлении ``message_created``
+    handler смотрит, нет ли уже PostLink с таким channel_post_id, и если
+    есть — пропускает обработку (long-polling может прислать апдейт повторно).
+
+    Также используется как реестр всех продублированных постов для будущих
+    фич (например, синк правок «канал → группа»).
+    """
 
     __tablename__ = "post_links"
 
@@ -193,7 +272,12 @@ class PostLink(Base):
 
 
 class PollingMarker(Base):
-    """Per-bot long-polling cursor. Survives restarts."""
+    """Курсор long-polling MAX API на одного бота.
+
+    Хранится в БД, чтобы пережить рестарты контейнера: иначе после
+    редеплоя бот получил бы заново все накопленные за окно события.
+    Удаляется CASCADE'ом вместе с ботом.
+    """
 
     __tablename__ = "polling_markers"
 
@@ -209,13 +293,18 @@ class PollingMarker(Base):
     bot: Mapped["Bot"] = relationship(back_populates="polling_marker")
 
 
-# ─── Welcome / Verification configs ───────────────────────────────────────────
+# ─── Конфиги приветствия / верификации ───────────────────────────────────────
 
 class WelcomeConfig(Base):
-    """
-    Standalone verification (captcha-gate) config for a group.
-    Independent of channel-group pairs — can be used for any group
-    without a paired channel.
+    """Standalone-конфиг captcha-gate для произвольной группы.
+
+    Появился позже, чем verification_* в ChannelGroupPair, и теперь является
+    рекомендуемым способом: группе не обязательно быть привязанной к
+    каналу. Если на одну и ту же группу заведён и WelcomeConfig, и пара —
+    приоритет у WelcomeConfig (см. CLAUDE.md и handlers).
+
+    UNIQUE(bot_id, group_id) защищает от дублей: на одну группу — один
+    конфиг для одного бота.
     """
     __tablename__ = "welcome_configs"
 
@@ -252,17 +341,27 @@ class WelcomeConfig(Base):
     __table_args__ = (
         UniqueConstraint("bot_id", "group_id", name="uq_welcome_config_bot_group"),
         Index("ix_welcome_config_bot_group", "bot_id", "group_id"),
+        # Списочный API /api/welcome/configs: WHERE user_id = current_user.id.
+        Index("ix_welcome_config_user", "user_id"),
     )
 
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
+# ─── Журнал событий ──────────────────────────────────────────────────────────
 
 class EventLog(Base):
+    """Журнал бизнес-событий для отображения в UI.
+
+    Не путать с logger.info/.error — туда уходят только сообщения для
+    оператора сервера. EventLog — это то, что видит конкретный
+    пользователь в /logs (его собственные действия и события его ботов).
+
+    bot_id обнуляется при удалении бота, чтобы записи в журнале
+    остались как историческая справка.
+    """
     __tablename__ = "event_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    # Which bot generated the event (optional context)
     bot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bots.id", ondelete="SET NULL"), nullable=True)
     level: Mapped[LogLevel] = mapped_column(Enum(LogLevel, native_enum=False), default=LogLevel.info)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -274,12 +373,22 @@ class EventLog(Base):
 
     __table_args__ = (
         Index("ix_log_created", "created_at"),
+        # Страница /logs всегда фильтрует по user_id и сортирует по created_at DESC.
+        Index("ix_event_log_user_created", "user_id", "created_at"),
+        # Будущая фильтрация «логи конкретного бота» в UI.
+        Index("ix_event_log_bot_created", "bot_id", "created_at"),
     )
 
 
-# ─── Scheduled posts ──────────────────────────────────────────────────────────
+# ─── Отложенные публикации ───────────────────────────────────────────────────
 
 class ScheduledPost(Base):
+    """Отложенный пост для автопостинга.
+
+    Опрашивается scheduler'ом каждые 30 сек (см. scheduler/main.py).
+    attachments_json хранит JSON-массив вложений (схема MAX inline_keyboard
+    и т.п.); строка вместо JSONB — для совместимости с миграциями.
+    """
     __tablename__ = "scheduled_posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -298,40 +407,47 @@ class ScheduledPost(Base):
     pair: Mapped["ChannelGroupPair"] = relationship(back_populates="scheduled_posts")
 
     __table_args__ = (
+        # Используется scheduler'ом: WHERE status=pending AND scheduled_at<=now.
         Index("ix_scheduled_status_at", "status", "scheduled_at"),
+        # Страница автопостинга: посты конкретной пары, фильтр по статусу.
+        Index("ix_scheduled_post_pair_status", "pair_id", "status"),
     )
 
 
-# ─── Verification requests ────────────────────────────────────────────────────
+# ─── Запросы верификации ─────────────────────────────────────────────────────
 
 class VerificationRequest(Base):
-    """
-    Tracks a single captcha-gate challenge for a new group member.
+    """Один запрос captcha-gate для конкретного нового участника.
 
-    Flow:
-      1. user joins group → bot creates VerificationRequest (status=pending)
-      2. bot posts a message with deep-link button to the group
-      3. user clicks → opens bot → /start with payload "verify_<token>"
-      4. bot marks status=verified, edits group message, optionally sends DM
-      5. scheduler: if deadline passed and status=pending → kick + status=kicked
+    Поток:
+      1. user_added → handler создаёт запись (status=pending);
+      2. бот шлёт в группу сообщение с deep-link-кнопкой;
+      3. юзер кликает → bot_started с payload="verify_<token>";
+      4. handler помечает status=verified, удаляет сообщение, шлёт DM;
+      5. при истечении deadline scheduler делает status=kicked + kick.
+
+    Запись связана с одним из двух конфигов: welcome_config_id (новый
+    стиль) либо pair_id (legacy). Ровно один из FK заполнен.
     """
     __tablename__ = "verification_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # Legacy FK — used for pair-based verification (channel+group pairs)
+    # Legacy: верификация в рамках пары канал↔группа.
     pair_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("channel_group_pairs.id", ondelete="CASCADE"), nullable=True
     )
-    # New FK — used for standalone WelcomeConfig-based verification
+    # Новый стиль: standalone-конфиг для произвольной группы.
     welcome_config_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("welcome_configs.id", ondelete="CASCADE"), nullable=True
     )
-    # Max user_id of the person being verified
+    # MAX user_id того, кого верифицируем (строка, т.к. в MAX это число
+    # большой разрядности — храним как строку, чтобы избежать целочисл. переполнений).
     max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     user_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    # Secret token embedded in the deep-link payload
+    # Секретный токен в payload deep-link'а — генерируется secrets.token_hex(24).
     token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    # Message sent in the group chat (to delete on success/failure)
+    # ID сообщения, отправленного в группу — чтобы потом его удалить
+    # (на успех или на kick).
     group_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[VerificationStatus] = mapped_column(
@@ -351,15 +467,25 @@ class VerificationRequest(Base):
     )
 
     __table_args__ = (
+        # Лукап в _handle_bot_started по token (deep-link payload).
         Index("ix_verification_token", "token"),
+        # scheduler.kick_expired_verifications: WHERE status=pending AND deadline<=now.
         Index("ix_verification_status_deadline", "status", "deadline"),
+        # handlers._handle_member_added: проверка «уже есть pending».
+        Index("ix_verification_welcome_config_status", "welcome_config_id", "status"),
+        Index("ix_verification_pair_status", "pair_id", "status"),
     )
 
 
-# ─── AI Assistant ──────────────────────────────────────────────────────────────
+# ─── AI-ассистент ────────────────────────────────────────────────────────────
 
 class AssistantConfig(Base):
-    """Per-(bot, group) AI assistant configuration."""
+    """Конфигурация AI-ассистента для пары (бот, группа).
+
+    На один (bot_id, group_id) — один конфиг. Активируется флагом
+    is_enabled, чтобы можно было временно «выключить мозги» без удаления
+    настроек. api_key хранится Fernet-зашифрованным, как и токены ботов.
+    """
     __tablename__ = "assistant_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -386,11 +512,23 @@ class AssistantConfig(Base):
     __table_args__ = (
         UniqueConstraint("bot_id", "group_id", name="uq_assistant_config_bot_group"),
         Index("ix_assistant_config_bot_group", "bot_id", "group_id"),
+        # Списочный API /api/assistant/configs: WHERE user_id = current_user.id.
+        Index("ix_assistant_config_user", "user_id"),
     )
 
 
 class UserBotContext(Base):
-    """Tracks which groups a MAX user has been verified in for a given bot."""
+    """«Членство» MAX-пользователя в конкретном AI-ассистенте.
+
+    Создаётся при успешной верификации (см. handlers._save_user_bot_context),
+    если для (bot, group) есть AssistantConfig. Используется как маркер
+    «этому юзеру можно отвечать AI-моделью в DM». Если пользователь
+    верифицирован в нескольких группах одного бота — записей будет несколько.
+
+    assistant_config_id обнуляется при удалении конфига (SET NULL),
+    но запись остаётся — handlers умеют переподвязать её к новому
+    конфигу с тем же group_id.
+    """
     __tablename__ = "user_bot_contexts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -415,7 +553,14 @@ class UserBotContext(Base):
 
 
 class ConversationMessage(Base):
-    """Stores full conversation history between a MAX user and the AI assistant."""
+    """История переписки между пользователем MAX и AI-ассистентом.
+
+    Хранится целиком (без обрезки): нужна и для контекста модели
+    (см. _handle_dm_message), и для веб-инбокса (владелец видит, что
+    отвечал бот). chat_id и user_avatar заполняются по возможности —
+    они нужны, чтобы из инбокса можно было ответить вручную и показать
+    аватарку без повторного запроса в MAX API.
+    """
     __tablename__ = "conversation_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -428,7 +573,9 @@ class ConversationMessage(Base):
     assistant_config_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("assistant_configs.id", ondelete="SET NULL"), nullable=True
     )
-    role: Mapped[str] = mapped_column(String(16), nullable=False)  # "user" | "assistant"
+    # "user" — сообщение от MAX-пользователя; "assistant" — ответ AI или
+    # ручной ответ владельца через инбокс. Совместимо с OpenAI-форматом.
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -440,7 +587,13 @@ class ConversationMessage(Base):
 
 
 class InboxReadStatus(Base):
-    """Когда владелец инбокса последний раз открывал переписку с конкретным пользователем."""
+    """Время последнего открытия переписки в инбоксе.
+
+    Используется UI для подсчёта непрочитанных сообщений (badge на аватарке
+    пользователя/группы) — сравниваем ConversationMessage.created_at
+    с last_read_at. Запись upsert'ится при открытии переписки —
+    см. ``inbox_messages`` в web/routers/api.py.
+    """
     __tablename__ = "inbox_read_status"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

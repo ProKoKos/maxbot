@@ -1,3 +1,11 @@
+"""
+Окружение Alembic.
+
+Использует sync_database_url (psycopg2) — async-драйвер asyncpg
+не поддерживается стандартными Alembic-операциями. Метаданные
+берутся из ``db.models.Base.metadata``, чтобы автогенерация (autogenerate)
+видела все модели.
+"""
 import sys
 import os
 from logging.config import fileConfig
@@ -5,7 +13,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Make project root importable
+# Корень проекта в sys.path — иначе импорт ``db.models`` не сработает,
+# когда alembic запущен из подкаталога db/alembic.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from db.models import Base  # noqa: E402
@@ -14,6 +23,8 @@ from shared.config import get_settings  # noqa: E402
 settings = get_settings()
 
 config = context.config
+# URL берётся из настроек, а не из alembic.ini — чтобы все сервисы
+# использовали одну и ту же конфигурацию подключения через .env.
 config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
 if config.config_file_name is not None:

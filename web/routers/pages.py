@@ -1,6 +1,23 @@
 """
-Jinja2 HTML page routes.
-All pages (except /login) require cookie auth, redirect to /login on failure.
+HTML-страницы (Jinja2).
+
+Все страницы, кроме ``/login``, требуют cookie-авторизации. Если cookie
+отсутствует или JWT битый — :func:`_require_user` бросает HTTPException(302)
+и пользователя редиректит на ``/login`` (см. handler в web/main.py).
+
+Структура файла:
+  • рабочие страницы — dashboard, bots, pairs, autopost, welcome,
+    assistant, logs, inbox; они тянут реальные данные из БД и
+    рендерят соответствующие шаблоны;
+  • placeholder-страницы (``coming_soon``) — единый шаблон ``coming_soon.html``,
+    наполняемый через хелпер :func:`_coming_soon`. Это «маркетинговые
+    превью» будущих фич (crosspost, RSS, series, ai-gen, moderation,
+    polls, gamification, faq, leads, helpdesk, stats, engagement,
+    audience-activity, reports, paid-access, products, affiliate, ads,
+    webhooks, crm, notifications, whitelabel) — каждая описывает 6
+    конкретных возможностей и помогает зондировать спрос. Все такие
+    функции имеют идентичную сигнатуру и тело — расхождения только в
+    тексте title/icon/description/features.
 """
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +38,7 @@ settings = get_settings()
 
 
 def _get_user_from_cookie(request: Request) -> str | None:
+    """Email из JWT-cookie, либо None если cookie нет / JWT битый."""
     from jose import JWTError
     from web.auth import decode_token
     token = request.cookies.get("access_token")
@@ -34,6 +52,12 @@ def _get_user_from_cookie(request: Request) -> str | None:
 
 
 async def _require_user(request: Request, session: AsyncSession) -> User:
+    """Достаёт пользователя по cookie, иначе бросает 302 → /login.
+
+    Используется как ручная замена Depends (чтобы не плодить кучу
+    идентичных параметров в каждой странице). 302 ловится глобальным
+    exception_handler'ом и превращается в RedirectResponse.
+    """
     email = _get_user_from_cookie(request)
     if not email:
         raise HTTPException(status_code=302, headers={"location": "/login"})
@@ -53,6 +77,14 @@ async def login_page(request: Request):
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request, session: DBSession):
+    """Обработка отправки формы логина.
+
+    На неверные креденшелы возвращаем 401 с тем же шаблоном (PRG не делаем —
+    форма короткая, redirect-после-POST не критичен).
+
+    ⚠️ CSRF-токен здесь не проверяется — для текущего масштаба считаем
+    риск приемлемым (samesite=lax cookie + ручной POST формы).
+    """
     form = await request.form()
     email = str(form.get("email", "")).strip()
     password = str(form.get("password", ""))
@@ -83,10 +115,15 @@ async def logout():
     return resp
 
 
-# ── Dashboard ──────────────────────────────────────────────────────────────────
+# ── Главная (дашборд) ─────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, session: DBSession):
+    """Главная страница: пары + список ботов + последние 5 событий.
+
+    bot_map нужна шаблону, чтобы быстро показать имя бота для каждой
+    пары без N+1 в Jinja (вместо ленивых ORM-обращений).
+    """
     user = await _require_user(request, session)
 
     pairs_result = await session.execute(
@@ -145,7 +182,9 @@ async def bots_page(request: Request, session: DBSession):
     )
 
 
-# ── Bot Inbox ─────────────────────────────────────────────────────────────────
+# ── Инбокс конкретного бота ───────────────────────────────────────────────────
+# Сама страница только рендерит шаблон — данные подгружает фронтенд через
+# /api/bots/{bot_id}/inbox/* (см. web/routers/api.py).
 
 @router.get("/bots/{bot_id}/inbox", response_class=HTMLResponse)
 async def bot_inbox_page(bot_id: int, request: Request, session: DBSession):
@@ -255,10 +294,21 @@ async def autopost_page(request: Request, session: DBSession):
     )
 
 
-# ── Helpers for placeholder pages ─────────────────────────────────────────────
+# ── Хелпер для placeholder-страниц ────────────────────────────────────────────
+# Все coming_soon-страницы (см. ниже — crosspost, RSS, series, ai-gen,
+# moderation, polls, gamification, faq, leads, helpdesk, stats, engagement,
+# audience-activity, reports, paid-access, products, affiliate, ads,
+# webhooks, crm, notifications, whitelabel) используют один шаблон
+# coming_soon.html и отличаются только title/icon/description/features.
+#
+# Тексты намеренно подробные — они работают как маркетинговое описание
+# будущей функциональности и одновременно как опросник «нужна ли фича».
+# Когда фича готовится к разработке, соответствующая функция заменяется
+# на полноценный handler с реальной логикой.
 
 def _coming_soon(request: Request, user, active_page: str, title: str, icon: str,
                  description: str, features: list[dict]):
+    """Рендерит шаблон ``coming_soon.html`` с переданными метаданными фичи."""
     return templates.TemplateResponse(
         "coming_soon.html",
         {
@@ -552,9 +602,13 @@ async def ai_gen_page(request: Request, session: DBSession):
     )
 
 
-# ── Аудитория ─────────────────────────────────────────────────────────────────
+# ── Раздел «Аудитория» (verification, AI и т.д.) ─────────────────────────────
 
-# Default verification strings — kept in sync with bot/handlers.py
+# Дефолтные шаблоны для placeholder'ов в формах настройки верификации.
+# Намеренно дублируются (без плейсхолдеров **bold**) с константами в
+# bot/constants.py — здесь мы показываем их пользователю как пример,
+# а не как реальный шаблон. Сохранение пустого поля в БД означает «использовать
+# DEFAULT_VERIFY_MSG из bot/constants.py» (см. handlers).
 _DEFAULT_VERIFY_MSG = (
     "👋 Привет, {имя}!\n\n"
     "Добро пожаловать в {группа}. Чтобы получить доступ к чату, подтвердите, "
@@ -567,6 +621,12 @@ _DEFAULT_WELCOME_DM = "✅ Верификация пройдена! Добро �
 
 @router.get("/welcome", response_class=HTMLResponse)
 async def welcome_page(request: Request, session: DBSession):
+    """Страница управления WelcomeConfig'ами (standalone-верификация).
+
+    Конфиги сериализуются на сервере в configs_data, чтобы фронт мог
+    встроить их JSON'ом в шаблон без дополнительного fetch'а — это
+    ускоряет первую отрисовку.
+    """
     user = await _require_user(request, session)
 
     configs_result = await session.execute(
@@ -982,6 +1042,12 @@ async def leads_page(request: Request, session: DBSession):
 
 @router.get("/assistant", response_class=HTMLResponse)
 async def assistant_page(request: Request, session: DBSession):
+    """Страница управления AssistantConfig'ами (AI-ассистент DM).
+
+    api_key расшифровывается на сервере, чтобы фронт сразу показал его
+    (для редактирования). Передача plain-ключа клиенту — известный
+    компромисс, оправданный UX'ом «Покажи мой ключ».
+    """
     user = await _require_user(request, session)
 
     configs_result = await session.execute(

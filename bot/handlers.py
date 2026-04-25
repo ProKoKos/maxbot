@@ -1,26 +1,50 @@
 """
-Event handlers for Max Bot API updates.
+Обработчики событий MAX Bot API.
 
-Flow for new channel post:
-  1. Look up the ChannelGroupPair for this channel + bot.
-  2. Duplicate post to the discussion group.
-  3. Edit the original channel post to add the inline button.
-  4. Save PostLink: channel_post_id → group_message_id.
-  5. Write EventLog entry.
+Каждое событие из long-polling/webhook попадает сюда через диспетчер
+:func:`handle_update`, который по полю ``update_type`` вызывает соответствующий
+``_handle_*``. Вся работа выполняется в рамках одной AsyncSession,
+которая открывается на пакет апдейтов в supervisor'е.
 
-Flow for verification (captcha-gate):
-  user_added / chat_member_added:
-    1. Look up WelcomeConfig by group_id + bot_id (new); fall back to ChannelGroupPair.
-    2. Skip if the joining user IS the bot itself.
-    3. Generate a secret token; save VerificationRequest with deadline.
-    4. Send verification message with deep-link button to group.
+──────────────────────────────────────────────────────────────────────────────
+ПОТОК «новый пост в канале» (``message_created`` в чате типа ``channel``):
+  1. Найти активную ChannelGroupPair (channel_id + этот же bot_id).
+  2. Проверить дубликат по PostLink.channel_post_id → не повторяем.
+  3. Отправить пост-копию в группу (текст + media-вложения).
+  4. Отредактировать оригинал в канале — приклеить inline-кнопку «💬 Прокомментировать».
+     Если в посте было ``share``-вложение, пробуем сохранить его при edit.
+  5. Сохранить связь PostLink (channel_post_id → group_message_id) и EventLog.
 
-  bot_started (payload="verify_<token>"):
-    1. Look up VerificationRequest by token.
-    2. Check deadline not passed and status == pending.
-    3. Mark status=verified.
-    4. Delete group message to keep the chat clean.
-    5. If verification_welcome_dm configured: send DM with "return to group" button.
+ПОТОК «верификация» (captcha-gate):
+  ``user_added`` / ``chat_member_added`` — пользователь вошёл в группу:
+    1. Сначала пробуем WelcomeConfig (новый, standalone), потом fallback
+       на ChannelGroupPair. Приоритет описан в CLAUDE.md.
+    2. Пропускаем, если в группу зашёл сам бот (max_user_id совпадает).
+    3. Пропускаем, если для этого пользователя уже есть pending-запрос.
+    4. Генерируем secret-токен и deadline = now + verification_timeout_min.
+    5. Отправляем в группу сообщение с deep-link кнопкой
+       ``https://max.ru/<bot>?start=verify_<token>``.
+    6. Сохраняем VerificationRequest со ссылкой на конфиг (welcome_config_id
+       либо pair_id — ровно одно из двух).
+
+  ``bot_started`` (payload = ``verify_<token>``):
+    1. Находим VerificationRequest по token.
+    2. Если deadline истёк — помечаем expired, шлём пользователю DM.
+    3. Иначе ставим status=verified, удаляем сообщение из группы (чтобы
+       не засорять чат), при наличии конфига AssistantConfig — связываем
+       пользователя через UserBotContext (для AI-ассистента).
+    4. Шлём welcome DM с кнопкой возврата в группу (если задана).
+
+ПОТОК «сообщение в группе от непроверенного пользователя»:
+  MAX API не поддерживает mute/restrict — поэтому handler ловит каждое
+  сообщение в группе и удаляет его, пока есть открытый VerificationRequest
+  (см. :func:`_delete_if_unverified`). Ограничение описано в CLAUDE.md.
+
+ПОТОК «личный диалог с ботом» (chat_type == ``dialog``):
+  Если для бота настроен AssistantConfig и пользователь связан с ним
+  через UserBotContext, отправляем запрос на OpenAI-совместимое API
+  (через :mod:`bot.ollama_client`) и отвечаем в DM. История переписки
+  сохраняется в ConversationMessage и используется как контекст.
 """
 import logging
 import secrets
@@ -33,6 +57,12 @@ from sqlalchemy.orm import selectinload
 import bot.ollama_client as ollama_client
 from bot.buttons import comment_button, discussion_header
 from bot.client import MaxAPIError, MaxClient
+from bot.constants import (
+    DEFAULT_VERIFY_BTN,
+    DEFAULT_VERIFY_MSG,
+    RETURN_TO_GROUP_LABEL,
+    VERIFY_PAYLOAD_PREFIX,
+)
 from bot.crypto import decrypt_token
 from db.models import (
     AssistantConfig,
@@ -50,25 +80,8 @@ from db.models import (
 
 logger = logging.getLogger(__name__)
 
-# ── Default verification message template ─────────────────────────────────────
 
-_DEFAULT_VERIFY_MSG = (
-    "👋 Привет, **{имя}**!\n\n"
-    "Добро пожаловать в *{группа}*. Чтобы получить доступ к чату, подтвердите, "
-    "что вы не бот — нажмите кнопку ниже.\n\n"
-    "⏰ Время на верификацию: **{минут} мин.**"
-)
-_DEFAULT_VERIFY_BTN = "✅ Я не бот"
-
-_DEFAULT_KICK_MSG = (
-    "❌ **{имя}** не прошёл(а) проверку и был(а) исключён(а) из группы."
-)
-_DEFAULT_SUCCESS_MSG = (
-    "✅ **{имя}** прошёл(а) проверку и получил(а) доступ к чату."
-)
-
-
-# ── Main dispatcher ────────────────────────────────────────────────────────────
+# ── Главный диспетчер ─────────────────────────────────────────────────────────
 
 async def handle_update(
     update: dict,
@@ -76,7 +89,16 @@ async def handle_update(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
-    """Dispatch a single update dict to the appropriate handler."""
+    """Раскидывает один MAX-апдейт по нужному ``_handle_*``.
+
+    ``bot_id`` передаётся явно из supervisor'а — это важно для multi-bot
+    режима: один и тот же канал/группа может быть подключён к нескольким
+    ботам, и handler должен видеть только «свои» сущности (см. фильтры по
+    ``bot_id`` во всех запросах).
+
+    MAX в разных версиях API использует ``update_type`` либо ``type`` —
+    поддерживаем оба варианта, чтобы не зависеть от формата.
+    """
     update_type = update.get("update_type") or update.get("type", "")
 
     if update_type == "message_created":
@@ -84,12 +106,13 @@ async def handle_update(
     elif update_type == "bot_started":
         await _handle_bot_started(update, session, client, bot_id=bot_id)
     elif update_type in ("user_added", "chat_member_added"):
+        # MAX API использует обе вариации в зависимости от способа вступления.
         await _handle_member_added(update, session, client, bot_id=bot_id)
     else:
         logger.debug("Unhandled update type: %r", update_type)
 
 
-# ── Channel post duplication ───────────────────────────────────────────────────
+# ── Дублирование постов из канала в группу обсуждений ────────────────────────
 
 async def _handle_message_created(
     update: dict,
@@ -97,16 +120,24 @@ async def _handle_message_created(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
+    """Маршрутизирует ``message_created`` по типу чата.
+
+    Один handler обслуживает три сценария — дублирование канала, DM
+    с AI-ассистентом и удаление сообщений у непроверенных пользователей.
+    Решение, что делать, принимается по ``chat_type``.
+    """
     message = update.get("message", {})
     chat = message.get("recipient", {})
     chat_type = chat.get("chat_type", "")
 
     if chat_type == "dialog":
+        # Личный диалог с ботом — отдаём AI-ассистенту.
         await _handle_dm_message(update, session, client, bot_id)
         return
 
     if chat_type != "channel":
-        # Non-channel message — delete it if the sender is still pending verification
+        # Обычная группа: если автор не прошёл верификацию — удаляем сообщение.
+        # Это замена mute/restrict, которых нет в MAX API (см. CLAUDE.md).
         await _delete_if_unverified(update, session, client, bot_id)
         return
 
@@ -118,7 +149,9 @@ async def _handle_message_created(
     if not chat_id or not message_id:
         return
 
-    # Find an active pair for this channel operated by this specific bot
+    # Ищем активную пару для канала, обслуживаемую именно этим ботом.
+    # Фильтр по bot_id обязателен в multi-bot режиме: один и тот же канал
+    # может быть в нескольких парах (но обычно у разных пользователей).
     query = select(ChannelGroupPair).where(
         ChannelGroupPair.channel_id == chat_id,
         ChannelGroupPair.enabled == True,  # noqa: E712
@@ -131,7 +164,9 @@ async def _handle_message_created(
     if not pair:
         return
 
-    # Avoid duplicate processing
+    # Защита от двойной обработки: при долгом polling MAX иногда
+    # переотправляет апдейты. PostLink — единственный источник истины
+    # о том, что пост уже продублирован.
     existing = await session.execute(
         select(PostLink).where(PostLink.channel_post_id == message_id)
     )
@@ -144,9 +179,13 @@ async def _handle_message_created(
         message_id, chat_id, bot_id, pair.id, pair.group_id,
     )
 
-    # Step 1: Duplicate post to discussion group
+    # Шаг 1. Публикуем пост в группе обсуждений.
+    # Заголовок добавляем всегда, даже без channel_link — иначе участники
+    # группы не поймут, откуда взялся пост.
     header = discussion_header(pair.channel_name or chat_id, message_id, pair.channel_link or "")
     group_text = header + (text or "")
+    # Из вложений берём только media (image/video/audio/file) — share-токены
+    # привязаны к контексту канала и не работают в чужом чате.
     forwardable_attachments = _extract_media_attachments(message_body)
 
     try:
@@ -164,10 +203,14 @@ async def _handle_message_created(
 
     group_message_id = str(group_resp.get("message", {}).get("body", {}).get("mid", ""))
 
-    # Step 2: Edit original channel post to add discussion button
+    # Шаг 2. Редактируем оригинал в канале — добавляем кнопку
+    # «💬 Прокомментировать», которая ведёт в группу.
     button = comment_button(pair.group_link, group_message_id)
     share_url = _extract_share_url(message_body)
 
+    # Если в посте была share-ссылка (репост превью), сначала пробуем
+    # сохранить её при edit. MAX иногда отвергает такой апдейт — fallback
+    # без share, чтобы кнопка всё равно появилась.
     edited = False
     if share_url:
         share_att = {"type": "share", "payload": {"url": share_url}}
@@ -179,11 +222,15 @@ async def _handle_message_created(
         edited = await _try_edit(client, message_id, text, [button])
 
     if not edited:
+        # Жёсткой ошибки нет — пост в группе уже опубликован, просто без
+        # обратной кнопки. Логируем как warning, чтобы пользователь видел.
         logger.warning("Could not edit post %s — button not added", message_id)
         await _log(session, pair.user_id, bot_id, LogLevel.warning,
                    f"Could not add button to post {message_id}")
 
-    # Step 3: Persist link
+    # Шаг 3. Сохраняем связь channel_post_id → group_message_id.
+    # Используется для дедупликации (см. выше) и потенциально — для
+    # прокидывания комментариев из группы в канал.
     session.add(PostLink(
         pair_id=pair.id,
         channel_post_id=message_id,
@@ -196,7 +243,7 @@ async def _handle_message_created(
     await session.commit()
 
 
-# ── Verification: new member joined ───────────────────────────────────────────
+# ── Верификация: новый участник вошёл в группу ───────────────────────────────
 
 async def _handle_member_added(
     update: dict,
@@ -204,11 +251,15 @@ async def _handle_member_added(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
+    """Реагирует на вход нового пользователя в группу.
+
+    Если для группы есть WelcomeConfig или пара с включённой верификацией,
+    отправляет в чат сообщение с deep-link кнопкой и создаёт
+    VerificationRequest. Иначе — тихо игнорирует событие (бот в группе
+    может быть нужен только для другого функционала).
     """
-    Fired when someone joins a group. If a WelcomeConfig (or pair verification)
-    is enabled for this group, send a captcha-gate message with a deep-link button.
-    """
-    # Extract chat_id — Max may use "chat_id" at top level or inside "chat" dict
+    # MAX в разных версиях кладёт chat_id либо на верхний уровень, либо
+    # внутрь объекта "chat". Поддерживаем оба варианта.
     chat_id = str(
         update.get("chat_id")
         or update.get("chat", {}).get("chat_id", "")
@@ -221,7 +272,8 @@ async def _handle_member_added(
         logger.debug("user_added: missing chat_id or user_id")
         return
 
-    # ── 1. Try WelcomeConfig first (standalone, new) ─────────────────────────
+    # 1. Пробуем найти standalone WelcomeConfig — он имеет приоритет над
+    # парой по правилу из CLAUDE.md (WelcomeConfig > ChannelGroupPair).
     wc: WelcomeConfig | None = None
     pair: ChannelGroupPair | None = None
 
@@ -237,7 +289,8 @@ async def _handle_member_added(
         )
         wc = wc_result.scalar_one_or_none()
 
-    # ── 2. Fall back to pair-based verification ───────────────────────────────
+    # 2. Standalone-конфига нет — fallback на пару канал↔группа
+    # с включённой галочкой verification_enabled.
     if wc is None:
         pair_query = select(ChannelGroupPair).where(
             ChannelGroupPair.group_id == chat_id,
@@ -258,12 +311,15 @@ async def _handle_member_added(
     bot: Bot | None = config.bot
     user_id = config.user_id
 
-    # Skip if this IS the bot itself joining the chat
+    # Защита от самого себя: при добавлении бота в группу MAX тоже шлёт
+    # ``user_added`` — не пытаемся верифицировать собственного бота.
     if bot and str(bot.max_user_id) == max_user_id:
         logger.debug("Bot itself joined group %s — skipping verification", chat_id)
         return
 
-    # Skip if there's already a pending verification for this user in this group
+    # Защита от двойной отправки приветствия — MAX иногда дублирует
+    # apdate, особенно при сетевых сбоях. Если pending-запрос уже есть,
+    # повторное сообщение бы запутало пользователя.
     if wc is not None:
         existing_q = select(VerificationRequest).where(
             VerificationRequest.welcome_config_id == wc.id,
@@ -287,15 +343,18 @@ async def _handle_member_added(
         config.id,
     )
 
-    # Build verification token and deadline
-    token = secrets.token_hex(24)  # 48-char hex string
+    # Генерируем secret-токен (192 бита энтропии) — он попадёт в URL и
+    # должен быть непредсказуемым, чтобы исключить подбор по чужим ссылкам.
+    token = secrets.token_hex(24)
     deadline = datetime.now(timezone.utc) + timedelta(minutes=config.verification_timeout_min)
 
-    # Get bot username for deep-link
+    # Имя бота нужно для deep-link. Кешируется в Bot.max_username при
+    # первой авторизации в supervisor._update_bot_identity.
     bot_username = (bot.max_username if bot else None) or ""
 
-    # Build message text from template
-    msg_template = config.verification_message or _DEFAULT_VERIFY_MSG
+    # Подставляем плейсхолдеры в шаблон (замены безопасны, т.к. это
+    # отображаемый текст, а не SQL/HTML — подстановка идёт в payload MAX).
+    msg_template = config.verification_message or DEFAULT_VERIFY_MSG
     msg_text = (
         msg_template
         .replace("{имя}", user_name)
@@ -303,9 +362,14 @@ async def _handle_member_added(
         .replace("{минут}", str(config.verification_timeout_min))
     )
 
-    # Build deep-link button
-    btn_text = config.verification_button_text or _DEFAULT_VERIFY_BTN
-    deep_link_url = f"https://max.ru/{bot_username}?start=verify_{token}" if bot_username else ""
+    # Без max_username бот не сможет дать рабочую deep-ссылку — не имеет
+    # смысла отправлять кнопку, ведущую в никуда. Логируем и выходим;
+    # пользователь сможет докатить max_username руками в настройках бота.
+    btn_text = config.verification_button_text or DEFAULT_VERIFY_BTN
+    deep_link_url = (
+        f"https://max.ru/{bot_username}?start={VERIFY_PAYLOAD_PREFIX}{token}"
+        if bot_username else ""
+    )
     if not deep_link_url:
         logger.warning(
             "Bot has no username — cannot generate verification deep-link for config %d", config.id
@@ -341,7 +405,9 @@ async def _handle_member_added(
         await session.commit()
         return
 
-    # Save verification request (link to WelcomeConfig or pair)
+    # Сохраняем запрос. Заполняется ровно один из FK
+    # (welcome_config_id или pair_id) — наша модель допускает оба, но
+    # верификация всегда привязана к конкретному источнику конфига.
     vr = VerificationRequest(
         welcome_config_id=wc.id if wc is not None else None,
         pair_id=pair.id if pair is not None else None,
@@ -361,7 +427,7 @@ async def _handle_member_added(
     await session.commit()
 
 
-# ── Verification: user clicked /start in bot ──────────────────────────────────
+# ── Верификация: пользователь нажал кнопку и пришёл в бота ───────────────────
 
 async def _handle_bot_started(
     update: dict,
@@ -369,34 +435,45 @@ async def _handle_bot_started(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
-    """
-    Fired when a user opens the bot / uses a deep-link.
-    If payload starts with "verify_", process the captcha-gate response.
+    """Обрабатывает первый старт диалога с ботом / deep-link.
+
+    Если payload — наш ``verify_<token>``, проводим верификацию.
+    Иначе просто игнорируем (это может быть обычный /start от человека,
+    который захотел познакомиться с ботом).
+
+    ВНИМАНИЕ: race condition — если пользователь два раза быстро нажмёт
+    кнопку, оба обработчика прочитают status=pending до коммита первого.
+    Сейчас второй просто увидит «Вы уже прошли верификацию», что ок;
+    но при необходимости здесь можно добавить SELECT … FOR UPDATE.
     """
     user_info = update.get("user", {})
     max_user_id = str(user_info.get("user_id", ""))
     user_name = user_info.get("name") or user_info.get("username") or "Участник"
 
-    # chat_id for sending DM reply: in Max, the user's private chat_id
-    # can be either update.chat_id or the user_id itself
+    # Для отправки DM нужен chat_id личного диалога. В MAX он совпадает
+    # с user_id, если apdate пришёл без явного chat_id (что бывает
+    # на старте диалога).
     chat_id_for_dm = str(
         update.get("chat_id") or max_user_id
     )
 
-    # Payload comes from ?start=PAYLOAD in the deep-link
+    # Payload — то, что было в ?start=…, MAX называет это поле по-разному
+    # ("payload" / "start_payload"). Проверяем оба.
     payload = str(update.get("payload") or update.get("start_payload") or "").strip()
 
-    if not payload.startswith("verify_"):
+    if not payload.startswith(VERIFY_PAYLOAD_PREFIX):
         logger.info("bot_started from user %s (no verification payload)", max_user_id)
         return
 
-    token = payload[len("verify_"):]
+    token = payload[len(VERIFY_PAYLOAD_PREFIX):]
     if not token:
         return
 
     logger.info("Verification response: user %s, token %s", max_user_id, token[:8] + "...")
 
-    # Look up request — eagerly load both config types
+    # Подгружаем сразу обе ветки (welcome_config и pair) — заранее,
+    # потому что какая именно живёт, мы не знаем; selectinload экономит
+    # один-два дополнительных round-trip.
     result = await session.execute(
         select(VerificationRequest)
         .where(VerificationRequest.token == token)
@@ -413,7 +490,9 @@ async def _handle_bot_started(
                             "⚠️ Ссылка верификации не найдена или устарела.")
         return
 
-    # Resolve config (WelcomeConfig takes priority, fall back to pair)
+    # Резолвим конфиг по тому же приоритету, что и в _handle_member_added:
+    # welcome_config (новый стиль) → pair (legacy). Если оба удалены
+    # пользователем уже после старта верификации — мягко сообщаем юзеру.
     if vr.welcome_config_id and vr.welcome_config:
         config = vr.welcome_config
         user_id = config.user_id
@@ -427,7 +506,9 @@ async def _handle_bot_started(
 
     now = datetime.now(timezone.utc)
 
-    # Check already processed
+    # Если статус уже не pending — кто-то опередил (либо сам пользователь
+    # дважды нажал кнопку, либо scheduler успел кикнуть). Просто отвечаем
+    # понятным сообщением — без лишних действий.
     if vr.status != VerificationStatus.pending:
         msg = {
             VerificationStatus.verified: "✅ Вы уже прошли верификацию!",
@@ -460,7 +541,9 @@ async def _handle_bot_started(
     await _save_user_bot_context(session, bot_id, vr.max_user_id, config)
     await session.commit()
 
-    # Delete group verification message to keep the chat clean
+    # Удаляем сообщение из группы, чтобы не засорять чат после верификации.
+    # Если удалить не удалось (например, бот разжалован из админов) —
+    # это не блокирует основной поток, просто warning.
     if vr.group_message_id:
         try:
             await client.delete_message(message_id=vr.group_message_id)
@@ -481,7 +564,9 @@ async def _handle_bot_started(
             f"✅ Верификация пройдена! Добро пожаловать в *{config.group_name or 'группу'}*."
         )
 
-    # Attach "Return to group" button if the group has a public link
+    # Кнопка возврата работает только при наличии публичной ссылки на
+    # группу. Без неё MAX не открыл бы группу извне, поэтому не кладём
+    # пустую кнопку — лучше отправить просто текст.
     return_button = None
     if config.group_link:
         return_button = {
@@ -489,7 +574,7 @@ async def _handle_bot_started(
             "payload": {
                 "buttons": [[{
                     "type": "link",
-                    "text": "💬 Вернуться в группу",
+                    "text": RETURN_TO_GROUP_LABEL,
                     "url": config.group_link,
                 }]]
             },
@@ -499,7 +584,7 @@ async def _handle_bot_started(
                         attachments=[return_button] if return_button else None)
 
 
-# ── AI assistant DM handler ───────────────────────────────────────────────────
+# ── Личный диалог: AI-ассистент ──────────────────────────────────────────────
 
 async def _handle_dm_message(
     update: dict,
@@ -507,7 +592,20 @@ async def _handle_dm_message(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
-    """Handle an incoming DM and reply using the AI assistant if configured."""
+    """Обрабатывает входящее DM и при необходимости отвечает AI-моделью.
+
+    Алгоритм:
+      1. Находим UserBotContext: пользователь должен быть «связан» с
+         AssistantConfig (связь создаётся при успешной верификации).
+      2. Пишем входящее сообщение в ConversationMessage до запроса в AI —
+         чтобы оно сохранилось, даже если AI упадёт.
+      3. Собираем сообщения = system_prompt + история + новое user-сообщение.
+      4. Зовём ollama_client.chat(); ответ пишем в БД и шлём в DM.
+
+    Если у бота нет AssistantConfig или модель/ключ не настроены — handler
+    тихо не отвечает, чтобы бот не казался «сломанным» там, где AI вообще
+    не нужен.
+    """
     message = update.get("message", {})
     sender = message.get("sender", {})
     max_user_id = str(sender.get("user_id", ""))
@@ -529,13 +627,17 @@ async def _handle_dm_message(
     if not contexts:
         return
 
+    # Пользователь может быть верифицирован в нескольких группах одного
+    # бота — берём первый включённый AssistantConfig. Если конфиг был
+    # удалён (FK установился в NULL по ondelete=SET NULL), пробуем
+    # перепривязать к новому конфигу с тем же group_id — это позволяет
+    # пересоздавать ассистента без ручного «обновления» подписки юзера.
     assistant_config: AssistantConfig | None = None
     for ctx in contexts:
         if ctx.assistant_config and ctx.assistant_config.is_enabled:
             assistant_config = ctx.assistant_config
             break
         elif ctx.assistant_config_id is None and ctx.group_id:
-            # Config was deleted and FK set to NULL — re-link if a new one exists
             relink = await session.execute(
                 select(AssistantConfig).where(
                     AssistantConfig.bot_id == bot_id,
@@ -562,6 +664,7 @@ async def _handle_dm_message(
     )
     history = history_result.scalars().all()
 
+    # Формат OpenAI Chat Completions: system → история → новый user-msg.
     messages: list[dict] = []
     if assistant_config.system_prompt:
         messages.append({"role": "system", "content": assistant_config.system_prompt})
@@ -569,6 +672,9 @@ async def _handle_dm_message(
         messages.append({"role": msg.role, "content": msg.content})
     messages.append({"role": "user", "content": text})
 
+    # Сохраняем входящее сразу, до сетевого запроса в AI: даже если
+    # модель упадёт, переписка не «потеряется» и владелец увидит её
+    # в инбоксе.
     session.add(ConversationMessage(
         bot_id=bot_id,
         max_user_id=max_user_id,
@@ -584,6 +690,9 @@ async def _handle_dm_message(
         return
 
     try:
+        # API-ключ хранится зашифрованным Fernet'ом, как и токены ботов
+        # (см. CLAUDE.md). Если ключ битый — пробуем без него; дальше
+        # ollama_client.chat() сам выдаст понятную ошибку.
         plain_key = ""
         if assistant_config.api_key:
             try:
@@ -619,7 +728,16 @@ async def _save_user_bot_context(
     max_user_id: str,
     config: WelcomeConfig | ChannelGroupPair,
 ) -> None:
-    """Create a UserBotContext linking this user to the AssistantConfig for the verified group."""
+    """Связывает прошедшего верификацию пользователя с AssistantConfig.
+
+    UserBotContext — это «членство» юзера в AI-комнате. Создаётся только
+    если для (bot_id, group_id) есть AssistantConfig — иначе тихо
+    выходим, чтобы не плодить пустые записи.
+
+    Если запись уже была (повторная верификация), просто обновляем
+    привязку — не вставляем дубликат, чтобы не нарушить
+    UNIQUE(bot_id, max_user_id, group_id).
+    """
     if bot_id is None:
         return
 
@@ -653,7 +771,7 @@ async def _save_user_bot_context(
     ))
 
 
-# ── Delete messages from unverified members ───────────────────────────────────
+# ── Удаление сообщений у непроверенных участников ────────────────────────────
 
 async def _delete_if_unverified(
     update: dict,
@@ -661,9 +779,15 @@ async def _delete_if_unverified(
     client: MaxClient,
     bot_id: int | None = None,
 ) -> None:
-    """
-    If the message author has a pending VerificationRequest in this group,
-    silently delete the message to enforce read-only until verification passes.
+    """Удаляет сообщение, если автор ещё не прошёл верификацию.
+
+    Замена недостающего mute/restrict в MAX API: если у юзера есть
+    pending-VerificationRequest в этой группе, его сообщения не должны
+    быть видны. Поиск идёт по обоим типам конфигов одновременно
+    (welcome_config_id IN (...) OR pair_id IN (...)) — одним запросом.
+
+    Ошибка delete_message глотается до warning — бот может уже не быть
+    админом в группе или сообщение уже удалено пользователем.
     """
     message = update.get("message", {})
     chat = message.get("recipient", {})
@@ -707,7 +831,7 @@ async def _delete_if_unverified(
         logger.warning("Could not delete unverified message %s: %s", message_id, exc)
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Вспомогательные функции ──────────────────────────────────────────────────
 
 async def _send_dm_safe(
     client: MaxClient,
@@ -715,7 +839,12 @@ async def _send_dm_safe(
     text: str,
     attachments: list[dict] | None = None,
 ) -> None:
-    """Send a DM; swallow errors (user may have blocked the bot)."""
+    """Отправляет DM, проглатывая ошибки.
+
+    Пользователь мог заблокировать бота, удалить аккаунт или просто
+    нажать кнопку с устаревшего устройства — это не повод падать
+    в основном потоке.
+    """
     if not chat_id:
         return
     try:
@@ -730,7 +859,12 @@ async def _try_edit(
     text: str,
     attachments: list[dict],
 ) -> bool:
-    """Edit a message with given attachments. Returns True on success."""
+    """Пытается отредактировать сообщение, возвращает True/False вместо исключения.
+
+    Используется для добавления кнопки «Прокомментировать» к посту в
+    канале: если редактирование не прошло (бот не админ, формат, лимит
+    редактирования), мы хотим продолжить работу, а не упасть.
+    """
     try:
         await client.edit_message(message_id=message_id, text=text or "", attachments=attachments)
         logger.info("Edited post %s with %d attachment(s)", message_id, len(attachments))
@@ -741,9 +875,15 @@ async def _try_edit(
 
 
 def _extract_media_attachments(body: dict) -> list[dict]:
-    """
-    Extract attachments forwardable to another chat (image/video/audio/file by token).
-    Excludes 'share' — those tokens are context-specific.
+    """Достаёт media-вложения, пригодные для пересылки в другой чат.
+
+    MAX выдаёт три класса вложений:
+      - media (image/video/audio/file) — у каждого есть ``token``,
+        который можно переотправить в другой чат как есть;
+      - share — превью URL/контактов; токен привязан к контексту канала
+        и в чужом чате обычно не работает;
+      - inline_keyboard — это уже UI поверх сообщения, не пересылаем.
+    Берём только первый класс.
     """
     attachments = []
     for att in body.get("attachments", []):
@@ -756,7 +896,7 @@ def _extract_media_attachments(body: dict) -> list[dict]:
 
 
 def _extract_share_url(body: dict) -> str | None:
-    """Return the URL from the first 'share' attachment, if present."""
+    """Возвращает URL первого share-вложения (если есть)."""
     for att in body.get("attachments", []):
         if att.get("type") == "share":
             url = att.get("payload", {}).get("url")
@@ -772,4 +912,9 @@ async def _log(
     level: LogLevel,
     message: str,
 ) -> None:
+    """Кладёт запись в EventLog без отдельного commit'а.
+
+    Не вызывает session.commit() — это делает caller вместе с другими
+    изменениями, чтобы лог писался атомарно с бизнес-операцией.
+    """
     session.add(EventLog(user_id=user_id, bot_id=bot_id, level=level, message=message))

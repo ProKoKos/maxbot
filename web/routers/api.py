@@ -1,7 +1,13 @@
 """
-REST API routes (JSON).
-Used by the UI via fetch() and by external integrations.
-All routes (except /login and /webhook) require JWT.
+JSON REST API.
+
+Используется фронтом (fetch()) и внешними интеграциями. Все эндпоинты,
+кроме ``/login`` и ``/webhook/{bot_id}``, требуют JWT (cookie или Bearer).
+
+Структура: разделы помечены заголовками ``# ── ...`` — Auth, Bots,
+Pairs, Welcome configs, Assistant configs, Logs, Posts, Verification
+settings, Webhook, Inbox. Каждый ресурс соблюдает изоляцию по
+``current_user.id`` — пользователь видит только свои сущности.
 """
 import json
 from datetime import datetime, timezone
@@ -47,6 +53,12 @@ class LoginRequest(BaseModel):
 
 @router.post("/login")
 async def login(body: LoginRequest, session: DBSession, _: RateLimit):
+    """Логин по email+password. Возвращает JWT в JSON и одновременно ставит httpOnly-cookie.
+
+    Cookie позволяет UI работать без явной передачи Bearer; JSON-токен
+    нужен внешним API-клиентам. samesite=lax предотвращает простейший
+    CSRF (но не заменяет полноценную CSRF-защиту форм, которой пока нет).
+    """
     result = await session.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(body.password, user.hashed_password):
@@ -109,7 +121,11 @@ async def list_bots(current_user: CurrentUser, session: DBSession, _: RateLimit)
 
 @router.post("/bots", status_code=201)
 async def create_bot(body: BotCreate, current_user: CurrentUser, session: DBSession, _: RateLimit):
-    # Validate token against Max API before saving
+    """Создаёт бота с проверкой токена на стороне MAX API.
+
+    Пользователь не должен сохранять заведомо нерабочий токен — поэтому
+    сначала зовём /me, и только при успехе шифруем + сохраняем.
+    """
     async with MaxClient(token=body.token) as client:
         try:
             me = await client.get_me()
@@ -186,6 +202,12 @@ async def toggle_bot(bot_id: int, current_user: CurrentUser, session: DBSession,
 
 @router.delete("/bots/{bot_id}", status_code=204)
 async def delete_bot(bot_id: int, current_user: CurrentUser, session: DBSession, _: RateLimit):
+    """Удаляет бота, аккуратно отвязывая пары (вместо каскадного DELETE).
+
+    Каскад снёс бы всю историю пары (PostLink, ScheduledPost), а это
+    полезные данные. Поэтому пары ``откалываются``: bot_id=NULL и enabled=False —
+    UI покажет их как «без бота», и владелец сможет привязать другого.
+    """
     result = await session.execute(
         select(Bot).where(Bot.id == bot_id, Bot.user_id == current_user.id)
     )
@@ -193,7 +215,6 @@ async def delete_bot(bot_id: int, current_user: CurrentUser, session: DBSession,
     if not bot:
         raise HTTPException(404, "Bot not found")
 
-    # Detach all pairs: set bot_id=NULL, disable them
     pairs_result = await session.execute(
         select(ChannelGroupPair).where(ChannelGroupPair.bot_id == bot_id)
     )
@@ -970,14 +991,16 @@ async def update_verification(
     return {"ok": True}
 
 
-# ── Webhook endpoint (for BOT_MODE=webhook) ───────────────────────────────────
+# ── Webhook endpoint (только для BOT_MODE=webhook) ───────────────────────────
 
 @router.post("/webhook/{bot_id}")
 async def webhook(bot_id: int, request: Request, session: DBSession):
-    """
-    Receives POST from Max servers for a specific bot.
-    URL pattern: /api/webhook/{bot_id}
-    Validates X-Max-Bot-Api-Secret header.
+    """Принимает входящий webhook от MAX для конкретного бота.
+
+    URL: ``/api/webhook/{bot_id}`` — bot_id зашит в URL, потому что
+    у каждого бота свой токен и свой webhook-эндпоинт. Подпись
+    запроса проверяется через заголовок ``X-Max-Bot-Api-Secret`` —
+    тот же секрет, что отдавали MAX'у при регистрации webhook'а.
     """
     secret = request.headers.get("X-Max-Bot-Api-Secret", "")
     if secret != settings.webhook_secret:
@@ -1003,9 +1026,15 @@ async def webhook(bot_id: int, request: Request, session: DBSession):
             logging.getLogger("web.webhook").exception("Webhook handler error: %s", exc)
 
 
-# ── Bot Inbox ─────────────────────────────────────────────────────────────────
+# ── Инбокс бота (DM-переписки + AI-ассистент) ─────────────────────────────────
+# Группа эндпоинтов /bots/{bot_id}/inbox/* для веб-страницы /bots/{id}/inbox.
+# Источник данных — таблица ConversationMessage (история DM с AI),
+# дополнительно подтягиваются аватары/иконки из MAX API
+# (с кешированием в ConversationMessage.user_avatar для следующих запросов).
+
 
 async def _require_bot_owner(bot_id: int, user_id: int, session) -> Bot:
+    """Проверка ownership бота. 404, если бот чужой/не существует."""
     result = await session.execute(
         select(Bot).where(Bot.id == bot_id, Bot.user_id == user_id)
     )
@@ -1127,7 +1156,10 @@ async def inbox_users(
 
     user_ids = [r.max_user_id for r in rows]
 
-    # last message content per user
+    # Загружаем всю переписку выбранных пользователей одним запросом —
+    # отсюда же берём last_msg, аватары и first_user_msg, чтобы не делать
+    # три отдельных round-trip'а в БД (это и есть устранение N+1).
+    # Сортировка DESC: первый встреченный msg.max_user_id и есть последний.
     last_msg_result = await session.execute(
         select(ConversationMessage)
         .where(

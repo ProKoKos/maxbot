@@ -631,7 +631,7 @@ class AssistantConfigCreate(BaseModel):
     group_name: str = ""
     is_enabled: bool = False
     system_prompt: str | None = None
-    model_name: str = "meta-llama/llama-3.3-70b-instruct:free"
+    model_name: str = "google/gemma-3-27b-it:free"
 
 
 class AssistantConfigUpdate(BaseModel):

@@ -238,7 +238,7 @@ function openSettings(idx) {
   document.getElementById('modal-title').textContent = 'Ассистент: ' + (cfg.group_name || cfg.group_id);
   document.getElementById('modal-subtitle').textContent = cfg.bot_name ? 'Бот: ' + cfg.bot_name : '';
   currentEnabled = !!cfg.is_enabled;
-  document.getElementById('field-model').value = cfg.model_name || 'meta-llama/llama-3.3-70b-instruct:free';
+  document.getElementById('field-model').value = cfg.model_name || 'google/gemma-3-27b-it:free';
   document.getElementById('field-prompt').value = cfg.system_prompt || '';
   _updateToggle();
   document.getElementById('save-status').textContent = '';
@@ -279,7 +279,7 @@ async function saveSettings(e) {
 
   const body = {
     is_enabled: currentEnabled,
-    model_name: document.getElementById('field-model').value.trim() || 'meta-llama/llama-3.3-70b-instruct:free',
+    model_name: document.getElementById('field-model').value.trim() || 'google/gemma-3-27b-it:free',
     system_prompt: document.getElementById('field-prompt').value.trim() || null,
   };
 

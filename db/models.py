@@ -371,7 +371,7 @@ class AssistantConfig(Base):
     group_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    model_name: Mapped[str] = mapped_column(String(128), nullable=False, default="meta-llama/llama-3.3-70b-instruct:free")
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False, default="google/gemma-3-27b-it:free")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

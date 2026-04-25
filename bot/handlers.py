@@ -577,6 +577,9 @@ async def _handle_dm_message(
     ))
     await session.commit()
 
+    if not assistant_config.model_name or not assistant_config.api_key:
+        return
+
     try:
         plain_key = ""
         if assistant_config.api_key:

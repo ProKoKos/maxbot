@@ -571,6 +571,7 @@ async def _handle_dm_message(
     session.add(ConversationMessage(
         bot_id=bot_id,
         max_user_id=max_user_id,
+        chat_id=chat_id,
         assistant_config_id=assistant_config.id,
         role="user",
         content=text,
@@ -601,6 +602,7 @@ async def _handle_dm_message(
     session.add(ConversationMessage(
         bot_id=bot_id,
         max_user_id=max_user_id,
+        chat_id=chat_id,
         assistant_config_id=assistant_config.id,
         role="assistant",
         content=reply,

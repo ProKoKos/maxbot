@@ -1164,6 +1164,21 @@ async def inbox_send(
     _: RateLimit,
 ):
     bot = await _require_bot_owner(bot_id, current_user.id, session)
+
+    # Ищем реальный chat_id из истории сообщений пользователя
+    last_msg_result = await session.execute(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.max_user_id == body.user_id,
+            ConversationMessage.chat_id.isnot(None),
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(1)
+    )
+    last_msg = last_msg_result.scalar_one_or_none()
+    chat_id = last_msg.chat_id if last_msg else body.user_id
+
     try:
         token = decrypt_token(bot.encrypted_token)
     except ValueError:
@@ -1171,13 +1186,14 @@ async def inbox_send(
 
     async with MaxClient(token=token) as client:
         try:
-            await client.send_message(chat_id=body.user_id, text=body.text, format="markdown")
+            await client.send_message(chat_id=chat_id, text=body.text, format="markdown")
         except MaxAPIError as e:
             raise HTTPException(502, f"Max API error: {e}")
 
     msg = ConversationMessage(
         bot_id=bot_id,
         max_user_id=body.user_id,
+        chat_id=chat_id,
         assistant_config_id=body.assistant_config_id,
         role="assistant",
         content=body.text,

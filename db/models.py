@@ -577,6 +577,10 @@ class ConversationMessage(Base):
     # ручной ответ владельца через инбокс. Совместимо с OpenAI-форматом.
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # JSON-массив вложений из DM: [{"type": "image", "token": "...", ...}, ...]
+    # Хранится как Text (как ScheduledPost.attachments_json) — без JSONB,
+    # чтобы не усложнять миграции. По умолчанию пустой массив "[]".
+    attachments_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

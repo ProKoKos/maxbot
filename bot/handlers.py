@@ -46,6 +46,7 @@
   (через :mod:`bot.ollama_client`) и отвечаем в DM. История переписки
   сохраняется в ConversationMessage и используется как контекст.
 """
+import json
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -620,8 +621,10 @@ async def _handle_dm_message(
     chat_id = str(chat.get("chat_id", "") or max_user_id)
     message_body = message.get("body", {})
     text = (message_body.get("text") or "").strip()
+    attachments = _extract_dm_attachments(message_body)
 
-    if not max_user_id or not text or bot_id is None:
+    # Пропускаем только если нет ни текста, ни вложений (пустой апдейт)
+    if not max_user_id or (not text and not attachments) or bot_id is None:
         return
 
     contexts_result = await session.execute(
@@ -676,11 +679,12 @@ async def _handle_dm_message(
         messages.append({"role": "system", "content": assistant_config.system_prompt})
     for msg in history:
         messages.append({"role": msg.role, "content": msg.content})
-    messages.append({"role": "user", "content": text})
+    if text:
+        messages.append({"role": "user", "content": text})
 
     # Сохраняем входящее сразу, до сетевого запроса в AI: даже если
     # модель упадёт, переписка не «потеряется» и владелец увидит её
-    # в инбоксе.
+    # в инбоксе. Вложения кладём в attachments_json.
     session.add(ConversationMessage(
         bot_id=bot_id,
         max_user_id=max_user_id,
@@ -689,8 +693,13 @@ async def _handle_dm_message(
         assistant_config_id=assistant_config.id,
         role="user",
         content=text,
+        attachments_json=json.dumps(attachments, ensure_ascii=False),
     ))
     await session.commit()
+
+    # Если нет текста — нечего отправлять модели (вложения пока не передаём в AI)
+    if not text:
+        return
 
     if not assistant_config.model_name or not assistant_config.api_key:
         return
@@ -899,6 +908,46 @@ def _extract_media_attachments(body: dict) -> list[dict]:
         if att_type in ("image", "video", "audio", "file") and token:
             attachments.append({"type": att_type, "payload": {"token": token}})
     return attachments
+
+
+def _extract_dm_attachments(body: dict) -> list[dict]:
+    """Извлекает вложения DM для сохранения в ConversationMessage.attachments_json.
+
+    В отличие от ``_extract_media_attachments`` (пересылка в группу),
+    здесь сохраняем максимум полезных метаданных для отображения в инбоксе:
+    тип, токен, URL превью, имя файла, размер.
+
+    ``inline_keyboard`` не сохраняем — это UI-элемент, не контент.
+    """
+    result = []
+    for att in body.get("attachments", []):
+        att_type = att.get("type", "")
+        if att_type in ("inline_keyboard",):
+            continue
+        payload = att.get("payload", {})
+        item: dict = {"type": att_type}
+        # Токен для скачивания через MAX API
+        if payload.get("token"):
+            item["token"] = payload["token"]
+        # Прямой URL (share, sticker)
+        if payload.get("url"):
+            item["url"] = payload["url"]
+        # Мета файла
+        if payload.get("filename"):
+            item["filename"] = payload["filename"]
+        if payload.get("size"):
+            item["size"] = payload["size"]
+        # Превью для image/video — MAX хранит их по-разному
+        for thumb_key in ("photo", "thumbnail"):
+            thumb = payload.get(thumb_key)
+            if isinstance(thumb, dict) and thumb.get("url"):
+                item["preview_url"] = thumb["url"]
+                break
+            elif isinstance(thumb, str) and thumb:
+                item["preview_url"] = thumb
+                break
+        result.append(item)
+    return result
 
 
 def _extract_share_url(body: dict) -> str | None:

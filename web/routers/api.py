@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func as sqlfunc, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import selectinload
 
 from bot.client import MaxAPIError, MaxClient
 from bot.crypto import decrypt_token, encrypt_token
@@ -33,6 +34,7 @@ from db.models import (
     ScheduledPost,
     Subscription,
     User,
+    UserBotContext,
     VerificationRequest,
     WelcomeConfig,
 )
@@ -1247,9 +1249,22 @@ async def inbox_users(
                     for cid in chat_ids:
                         try:
                             data = await client.get_chat(cid)
+                            # Стандартные поля иконки чата
                             url = _url_from(data, "icon", "avatar_url", "photo_url", "photo", "avatar")
                             if url:
                                 return uid, url
+                            # MAX для диалогов (type=dialog) кладёт инфо о
+                            # собеседнике в dialog_with_user — там есть photo/avatar_url.
+                            dwu = data.get("dialog_with_user") or data.get("owner")
+                            if isinstance(dwu, dict):
+                                url = _url_from(dwu, "avatar_url", "photo_url", "photo", "avatar", "full_avatar_url")
+                                if url:
+                                    return uid, url
+                            # Логируем ключи для диагностики (один раз на пользователя)
+                            _avatar_log.warning(
+                                "Avatar fields not found for uid=%s cid=%s, keys=%s",
+                                uid, cid, list(data.keys()),
+                            )
                         except MaxAPIError:
                             pass
                     return uid, None
@@ -1291,16 +1306,31 @@ async def inbox_users(
     )
     unread_counts: dict[str, int] = {row.max_user_id: row.unread_count for row in unread_result}
 
+    _ATT_LABELS = {
+        "image": "📷 Фото", "video": "🎥 Видео",
+        "audio": "🎤 Голосовое", "file": "📎 Файл",
+        "share": "🔗 Ссылка",
+    }
+
     users = []
     for r in rows:
         uid = r.max_user_id
         m = last_msg.get(uid)
+        last_text = (m.content or "").strip() if m else ""
+        if not last_text and m:
+            # Если нет текста — показываем тип первого вложения
+            try:
+                atts = json.loads(m.attachments_json or "[]")
+                if atts:
+                    last_text = _ATT_LABELS.get(atts[0].get("type", ""), "📎 Вложение")
+            except Exception:
+                pass
         users.append({
             "user_id": uid,
             "name": names.get(uid) or f"User {uid}",
             "avatar": stored_avatars.get(uid),
             "unread_count": unread_counts.get(uid, 0),
-            "last_message": m.content[:200] if m else "",
+            "last_message": last_text[:200],
             "last_role": m.role if m else "",
             "last_at": r.last_at.isoformat() if r.last_at else None,
         })
@@ -1351,10 +1381,129 @@ async def inbox_messages(
             "id": m.id,
             "role": m.role,
             "content": m.content,
+            "attachments": json.loads(m.attachments_json or "[]"),
             "created_at": m.created_at.isoformat(),
         }
         for m in msgs
     ]
+
+
+@router.get("/bots/{bot_id}/inbox/profile/{user_id}")
+async def inbox_profile(
+    bot_id: int,
+    user_id: str,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    """Профиль пользователя в инбоксе.
+
+    Возвращает агрегированную информацию: базовый профиль, статистику,
+    группы (через UserBotContext), ссылки из текста и вложения по типам.
+    Используется правым профильным панелью в inbox.html.
+    """
+    import re
+
+    await _require_bot_owner(bot_id, current_user.id, session)
+
+    # Все сообщения пользователя (ASC — нужны для first/last)
+    msgs_result = await session.execute(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.bot_id == bot_id,
+            ConversationMessage.max_user_id == user_id,
+        )
+        .order_by(ConversationMessage.created_at.asc())
+    )
+    msgs = msgs_result.scalars().all()
+    if not msgs:
+        raise HTTPException(404, "No messages found for this user")
+
+    first_msg = msgs[0]
+    last_msg_obj = msgs[-1]
+
+    # Аватар — берём из самого свежего сообщения с непустым user_avatar
+    avatar = None
+    for m in reversed(msgs):
+        if m.user_avatar:
+            avatar = m.user_avatar
+            break
+
+    # Имя — из VerificationRequest (самый свежий)
+    name_result = await session.execute(
+        select(VerificationRequest.user_name)
+        .where(VerificationRequest.max_user_id == user_id)
+        .order_by(VerificationRequest.created_at.desc())
+        .limit(1)
+    )
+    name = name_result.scalar() or f"User {user_id}"
+
+    # Статистика сообщений
+    user_msg_count = sum(1 for m in msgs if m.role == "user")
+    bot_msg_count = sum(1 for m in msgs if m.role == "assistant")
+
+    # Группы пользователя (через UserBotContext → AssistantConfig)
+    contexts_result = await session.execute(
+        select(UserBotContext)
+        .where(
+            UserBotContext.bot_id == bot_id,
+            UserBotContext.max_user_id == user_id,
+        )
+        .options(selectinload(UserBotContext.assistant_config))
+    )
+    groups = []
+    for ctx in contexts_result.scalars().all():
+        cfg = ctx.assistant_config
+        groups.append({
+            "group_id": ctx.group_id,
+            "group_name": cfg.group_name if cfg else ctx.group_id,
+        })
+
+    # Ссылки — regex-поиск по тексту сообщений (последние 100)
+    _url_re = re.compile(r"https?://[^\s<>\"'{}|\\^`\[\]]+")
+    links: list[dict] = []
+    for m in msgs:
+        if m.content:
+            for found_url in _url_re.findall(m.content):
+                links.append({
+                    "url": found_url,
+                    "date": m.created_at.isoformat(),
+                    "role": m.role,
+                })
+
+    # Вложения по типу (из attachments_json)
+    media: list[dict] = []
+    files: list[dict] = []
+    voices: list[dict] = []
+    for m in msgs:
+        try:
+            atts = json.loads(m.attachments_json or "[]")
+        except Exception:
+            atts = []
+        for att in atts:
+            entry = {**att, "date": m.created_at.isoformat(), "role": m.role}
+            t = att.get("type", "")
+            if t in ("image", "video"):
+                media.append(entry)
+            elif t == "audio":
+                voices.append(entry)
+            elif t == "file":
+                files.append(entry)
+
+    return {
+        "user_id": user_id,
+        "name": name,
+        "avatar": avatar,
+        "first_contact": first_msg.created_at.isoformat(),
+        "last_active": last_msg_obj.created_at.isoformat(),
+        "user_msg_count": user_msg_count,
+        "bot_msg_count": bot_msg_count,
+        "groups": groups,
+        "links": links[-100:],
+        "media": media[-100:],
+        "files": files[-100:],
+        "voices": voices[-100:],
+    }
 
 
 class InboxSendRequest(BaseModel):

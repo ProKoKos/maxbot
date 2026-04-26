@@ -19,6 +19,20 @@
     .resize-handle:hover, .resize-handle.dragging { background:#6366f1; }
     body.col-resizing { cursor:col-resize !important; user-select:none; }
     body.col-resizing * { cursor:col-resize !important; user-select:none !important; }
+    /* профиль */
+    .profile-tab { padding:6px 14px; font-size:12px; border-radius:6px; cursor:pointer; color:#6b7280; transition:all .15s; white-space:nowrap; }
+    .profile-tab.active { background:#e0e7ff; color:#4338ca; font-weight:600; }
+    .profile-tab:hover:not(.active) { background:#f3f4f6; color:#374151; }
+    .media-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:3px; }
+    .media-thumb { aspect-ratio:1; background:#e5e7eb; border-radius:4px; overflow:hidden; cursor:pointer; position:relative; }
+    .media-thumb img { width:100%; height:100%; object-fit:cover; }
+    .media-thumb .type-icon { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:24px; color:#9ca3af; }
+    /* вложения в пузырях */
+    .att-image { max-width:220px; border-radius:10px; overflow:hidden; margin-top:4px; cursor:pointer; }
+    .att-image img { display:block; width:100%; }
+    .att-file { display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(0,0,0,.06); border-radius:8px; margin-top:4px; font-size:12px; }
+    .att-audio { display:flex; align-items:center; gap:6px; padding:6px 10px; background:rgba(0,0,0,.06); border-radius:8px; margin-top:4px; font-size:12px; }
+    .att-video { max-width:220px; border-radius:10px; overflow:hidden; margin-top:4px; }
     @media (max-width: 767px) { .resize-handle { display:none; } }
   </style>
 </head>
@@ -31,12 +45,10 @@
        class="col-groups flex flex-col shrink-0 py-2 items-center overflow-y-auto"
        style="width:64px;">
 
-    <!-- Все чаты -->
     <button data-group-id="all" data-group-name="Все"
             onclick="selectGroup(this)"
             class="group-btn group-nav-item active mt-1">
       <div class="icon-wrap" style="background:#4a4a6a;">
-        <!-- chat bubble icon -->
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b0b0c8" stroke-width="1.8">
           <path stroke-linecap="round" stroke-linejoin="round"
                 d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
@@ -45,11 +57,8 @@
       <span class="label">Все</span>
     </button>
 
-    <div id="group-list" class="flex flex-col gap-0.5 items-center w-full mt-1 flex-1">
-      <!-- populated by JS -->
-    </div>
+    <div id="group-list" class="flex flex-col gap-0.5 items-center w-full mt-1 flex-1"></div>
 
-    <!-- Настройки -->
     <a href="/bots" title="К списку ботов" class="group-nav-item mb-1 mt-auto">
       <div class="icon-wrap" style="background:#3a3a4f;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0b0c8" stroke-width="1.8">
@@ -62,15 +71,13 @@
     </a>
   </div>
 
-  <!-- Resize handle: groups ↔ users -->
-  <div id="resize-handle-1" class="resize-handle hidden md:block" title="Перетащите, чтобы изменить ширину"></div>
+  <div id="resize-handle-1" class="resize-handle hidden md:block"></div>
 
   <!-- ── Колонка 2: список пользователей ────────────────────────────────── -->
   <div id="col-users"
        class="flex flex-col bg-white border-r border-gray-200 shrink-0"
        style="width:288px;">
 
-    <!-- Заголовок -->
     <div class="flex items-center gap-2 px-4 py-3 border-b border-gray-100 shrink-0">
       <button id="back-to-groups" onclick="showGroupsOnMobile()"
               class="hidden text-gray-400 hover:text-gray-600 mr-1 p-0.5">
@@ -82,29 +89,23 @@
       <span id="users-count" class="text-xs text-gray-400"></span>
     </div>
 
-    <!-- Поиск -->
     <div class="px-3 py-2 border-b border-gray-100 shrink-0">
       <input id="user-search" type="text" placeholder="Найти..."
              oninput="filterUsers(this.value)"
              class="w-full px-3 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
     </div>
 
-    <!-- Список -->
     <div id="user-list" class="flex-1 overflow-y-auto">
-      <div id="users-loading" class="flex items-center justify-center py-10 text-gray-400 text-sm">
-        Загрузка...
-      </div>
+      <div id="users-loading" class="flex items-center justify-center py-10 text-gray-400 text-sm">Загрузка...</div>
     </div>
   </div>
 
-  <!-- Resize handle: users ↔ chat -->
-  <div id="resize-handle-2" class="resize-handle hidden md:block" title="Перетащите, чтобы изменить ширину"></div>
+  <div id="resize-handle-2" class="resize-handle hidden md:block"></div>
 
   <!-- ── Колонка 3: чат ─────────────────────────────────────────────────── -->
-  <div id="col-chat"
-       class="flex-1 flex flex-col bg-gray-50 min-w-0">
+  <div id="col-chat" class="flex-1 flex flex-col bg-gray-50 min-w-0">
 
-    <!-- Шапка чата -->
+    <!-- Шапка чата (кликабельна для открытия профиля) -->
     <div class="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 shrink-0">
       <button onclick="showUsersOnMobile()"
               class="text-gray-400 hover:text-gray-600 p-0.5 hidden" id="btn-back-users">
@@ -112,13 +113,19 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
         </svg>
       </button>
-      <div id="chat-avatar-wrap" class="avatar-wrap hidden"
-           style="background:#e0e7ff; color:#4338ca; font-weight:700; font-size:14px;">
-      </div>
-      <div class="flex-1 min-w-0">
-        <div id="chat-name" class="font-semibold text-gray-800 text-sm truncate">Выберите чат</div>
-        <div id="chat-sub" class="text-xs text-gray-400 truncate"></div>
-      </div>
+      <!-- Кликабельный блок → открывает профиль -->
+      <button id="chat-header-profile-btn"
+              onclick="openProfile()"
+              class="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity disabled:opacity-100 disabled:cursor-default"
+              disabled>
+        <div id="chat-avatar-wrap" class="avatar-wrap hidden"
+             style="background:#e0e7ff; color:#4338ca; font-weight:700; font-size:14px;">
+        </div>
+        <div class="flex-1 min-w-0">
+          <div id="chat-name" class="font-semibold text-gray-800 text-sm truncate">Выберите чат</div>
+          <div id="chat-sub" class="text-xs text-gray-400 truncate"></div>
+        </div>
+      </button>
       <button onclick="loadMessages()" id="refresh-btn"
               class="hidden text-gray-400 hover:text-indigo-600 p-1 rounded transition-colors" title="Обновить">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -145,13 +152,62 @@
                   class="flex-1 resize-none px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 max-h-32 overflow-y-auto"
                   disabled></textarea>
         <button id="send-btn" onclick="sendMessage()"
-                class="shrink-0 w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                class="shrink-0 w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-content: center transition-colors"
                 disabled>
-          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
           </svg>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="resize-handle-3" class="resize-handle hidden md:block"></div>
+
+  <!-- ── Колонка 4: профиль пользователя ───────────────────────────────── -->
+  <div id="col-profile"
+       class="flex flex-col bg-white border-l border-gray-200 shrink-0 hidden"
+       style="width:320px; min-width:240px; max-width:500px;">
+
+    <!-- Заголовок панели -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
+      <h3 class="font-semibold text-gray-800 text-sm">Профиль</h3>
+      <button onclick="closeProfile()" class="text-gray-400 hover:text-gray-600 p-0.5 rounded" title="Закрыть">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Шапка профиля -->
+    <div id="profile-header" class="px-4 py-4 border-b border-gray-100 shrink-0 hidden">
+      <div class="flex items-center gap-3">
+        <div id="profile-avatar" class="w-14 h-14 rounded-full flex-shrink-0 flex items-center justify-content: center overflow-hidden" style="font-size:20px;font-weight:700;"></div>
+        <div class="min-w-0">
+          <div id="profile-name" class="font-semibold text-gray-900 text-sm truncate"></div>
+          <div id="profile-id" class="text-xs text-gray-400 mt-0.5"></div>
+        </div>
+      </div>
+      <div id="profile-stats" class="mt-3 flex gap-4 text-center text-xs">
+        <div><div id="profile-msg-count" class="font-semibold text-gray-800 text-base"></div><div class="text-gray-400">сообщений</div></div>
+        <div><div id="profile-first" class="font-semibold text-gray-800 text-base"></div><div class="text-gray-400">первый контакт</div></div>
+      </div>
+    </div>
+
+    <!-- Табы -->
+    <div class="flex gap-1 px-3 py-2 border-b border-gray-100 shrink-0 overflow-x-auto" id="profile-tabs">
+      <button class="profile-tab active" data-tab="overview" onclick="switchProfileTab(this)">Обзор</button>
+      <button class="profile-tab" data-tab="media" onclick="switchProfileTab(this)">Медиа</button>
+      <button class="profile-tab" data-tab="files" onclick="switchProfileTab(this)">Файлы</button>
+      <button class="profile-tab" data-tab="voices" onclick="switchProfileTab(this)">Голосовые</button>
+      <button class="profile-tab" data-tab="links" onclick="switchProfileTab(this)">Ссылки</button>
+    </div>
+
+    <!-- Содержимое профиля -->
+    <div id="profile-content" class="flex-1 overflow-y-auto">
+      <div class="flex items-center justify-center py-12 text-gray-400 text-sm" id="profile-loading">
+        Загрузка...
       </div>
     </div>
   </div>
@@ -166,6 +222,9 @@ let currentUserId = null;
 let currentUserName = '';
 let currentUserAvatar = null;
 let allUsers = [];
+let profileData = null;
+let profileTab = 'overview';
+let profileOpen = false;
 
 // ── Инициализация ──────────────────────────────────────────────────────────
 
@@ -180,38 +239,30 @@ async function loadGroups() {
   const res = await fetch(`/api/bots/${BOT_ID}/inbox/groups`);
   if (!res.ok) return;
   const groups = await res.json();
-
   const list = document.getElementById('group-list');
   list.innerHTML = '';
-
-  // skip "Все" (first item) — already rendered as static button
   for (const g of groups.slice(1)) {
-    const initials = (g.name || '?').slice(0, 2).toUpperCase();
+    const initials2 = (g.name || '?').slice(0, 2).toUpperCase();
     const btn = document.createElement('button');
     btn.className = 'group-btn group-nav-item';
     btn.dataset.groupId = g.id;
     btn.dataset.groupName = g.name;
     btn.onclick = function() { selectGroup(this); };
-
     const badge = g.count > 0
       ? `<span style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${g.count > 9 ? '9+' : g.count}</span>`
       : '';
-
     const iconContent = g.icon
       ? `<img src="${escHtml(g.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
-      : initials;
-
+      : initials2;
     btn.innerHTML = `
       <div style="position:relative;">
         <div class="icon-wrap" style="background:#4a4a6a;color:#e0e0f0;">${iconContent}</div>
         ${badge}
       </div>
       <span class="label">${escHtml(g.name)}</span>`;
-
     if (g.icon) {
-      btn.querySelector('.icon-wrap img').onerror = function() {
-        this.parentNode.textContent = initials;
-      };
+      const img = btn.querySelector('.icon-wrap img');
+      if (img) img.onerror = function() { this.parentNode.textContent = initials2; };
     }
     list.appendChild(btn);
   }
@@ -235,7 +286,6 @@ function selectGroup(btn) {
 async function loadUsers() {
   const list = document.getElementById('user-list');
   list.innerHTML = '<div class="flex items-center justify-center py-10 text-gray-400 text-sm">Загрузка...</div>';
-
   const res = await fetch(`/api/bots/${BOT_ID}/inbox/users?group_id=${currentGroupId}`);
   if (!res.ok) {
     list.innerHTML = '<div class="text-center py-8 text-red-400 text-sm">Ошибка загрузки</div>';
@@ -249,12 +299,10 @@ function renderUsers(users) {
   const list = document.getElementById('user-list');
   list.innerHTML = '';
   document.getElementById('users-count').textContent = users.length ? `${users.length}` : '';
-
   if (!users.length) {
     list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет диалогов</div>';
     return;
   }
-
   for (const u of users) {
     const preview = u.last_message || '';
     const prefix = u.last_role === 'assistant' ? '↩ ' : '';
@@ -264,7 +312,6 @@ function renderUsers(users) {
     const unread = (!isActive && u.unread_count > 0)
       ? `<span class="unread-badge" style="background:#ef4444;color:#fff;font-size:10px;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;flex-shrink:0;">${u.unread_count > 99 ? '99+' : u.unread_count}</span>`
       : '';
-
     const el = document.createElement('button');
     el.className = `user-item w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-indigo-50 transition-colors border-b border-gray-50 ${isActive ? 'bg-indigo-50' : ''}`;
     el.dataset.userId = u.user_id;
@@ -298,7 +345,6 @@ function selectUser(u) {
 
   document.querySelectorAll('.user-item').forEach(el => {
     el.classList.toggle('bg-indigo-50', el.dataset.userId === u.user_id);
-    // Убираем значок непрочитанных у выбранного пользователя сразу
     if (el.dataset.userId === u.user_id) {
       el.querySelectorAll('.unread-badge').forEach(b => b.remove());
     }
@@ -308,19 +354,23 @@ function selectUser(u) {
   const wrap = document.getElementById('chat-avatar-wrap');
   wrap.classList.remove('hidden');
   if (u.avatar) {
-    wrap.innerHTML = `<img src="${escHtml(u.avatar)}" alt="" onerror="this.parentNode.innerHTML='${initials(u.name)}'">`;
+    wrap.innerHTML = `<img src="${escHtml(u.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='${escHtml(initials(u.name))}'">`;
   } else {
     wrap.innerHTML = initials(u.name);
-    wrap.style.background = '#e0e7ff';
-    wrap.style.color = '#4338ca';
+    wrap.style.background = avatarColor(u.name);
+    wrap.style.color = '#fff';
   }
   document.getElementById('chat-name').textContent = u.name;
   document.getElementById('chat-sub').textContent = `ID: ${u.user_id}`;
   document.getElementById('refresh-btn').classList.remove('hidden');
+  document.getElementById('chat-header-profile-btn').disabled = false;
 
   document.getElementById('msg-input').disabled = false;
   document.getElementById('send-btn').disabled = false;
   document.getElementById('msg-input').focus();
+
+  // Если профиль открыт — перезагружаем для нового пользователя
+  if (profileOpen) loadProfile();
 
   loadMessages();
   showChatOnMobile();
@@ -332,7 +382,6 @@ async function loadMessages() {
   if (!currentUserId) return;
   const area = document.getElementById('messages-area');
   area.innerHTML = '<div class="flex justify-center py-6 text-gray-400 text-sm">Загрузка...</div>';
-
   const res = await fetch(`/api/bots/${BOT_ID}/inbox/messages?user_id=${encodeURIComponent(currentUserId)}&group_id=${currentGroupId}`);
   if (!res.ok) {
     area.innerHTML = '<div class="flex justify-center py-6 text-red-400 text-sm">Ошибка загрузки</div>';
@@ -348,10 +397,8 @@ function renderMessages(msgs) {
     area.innerHTML = '<div class="flex items-center justify-center h-full text-gray-400 text-sm">Нет сообщений</div>';
     return;
   }
-
   area.innerHTML = '';
   let lastDate = '';
-
   for (const m of msgs) {
     const isBot = m.role === 'assistant';
     const dt = new Date(m.created_at);
@@ -363,31 +410,250 @@ function renderMessages(msgs) {
       area.appendChild(sep);
       lastDate = dateStr;
     }
-
     const bubble = document.createElement('div');
     bubble.className = `flex gap-2 ${isBot ? 'justify-end' : 'justify-start'} items-end`;
     const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const attsHtml = renderAttachments(m.attachments || [], isBot);
 
     if (!isBot) {
-      // показываем маленький аватар слева
       const av = avatarTag(currentUserName, currentUserAvatar, 28);
       bubble.innerHTML = `
         <div class="shrink-0 self-end">${av}</div>
         <div class="max-w-xs sm:max-w-md lg:max-w-lg px-3 py-2 rounded-2xl rounded-bl-sm text-sm shadow-sm bg-white text-gray-800 border border-gray-100">
-          <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
+          ${m.content ? `<div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>` : ''}
+          ${attsHtml}
           <div class="text-xs mt-1 text-gray-400 text-right">${timeStr}</div>
         </div>`;
     } else {
       bubble.innerHTML = `
         <div class="max-w-xs sm:max-w-md lg:max-w-lg px-3 py-2 rounded-2xl rounded-br-sm text-sm shadow-sm bg-indigo-600 text-white">
-          <div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>
+          ${m.content ? `<div class="whitespace-pre-wrap break-words">${escHtml(m.content)}</div>` : ''}
+          ${attsHtml}
           <div class="text-xs mt-1 text-indigo-200 text-right">${timeStr}</div>
         </div>`;
     }
     area.appendChild(bubble);
   }
-
   area.scrollTop = area.scrollHeight;
+}
+
+function renderAttachments(atts, isBot) {
+  if (!atts || !atts.length) return '';
+  return atts.map(att => {
+    const t = att.type || '';
+    if (t === 'image') {
+      if (att.preview_url) {
+        return `<div class="att-image"><img src="${escHtml(att.preview_url)}" alt="Фото" loading="lazy" onerror="this.parentNode.innerHTML='<div style=padding:8px;font-size:12px;>📷 Фото</div>'"></div>`;
+      }
+      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">📷 Фото</div>`;
+    }
+    if (t === 'video') {
+      if (att.preview_url) {
+        return `<div class="att-video"><img src="${escHtml(att.preview_url)}" alt="Видео" loading="lazy" style="width:100%;"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">▶</div></div>`;
+      }
+      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">🎥 Видео</div>`;
+    }
+    if (t === 'audio') {
+      return `<div class="att-audio" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}"><span>🎤</span><span>Голосовое сообщение</span></div>`;
+    }
+    if (t === 'file') {
+      const fname = att.filename ? escHtml(att.filename) : 'Файл';
+      const fsize = att.size ? ` (${formatSize(att.size)})` : '';
+      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}"><span>📎</span><span>${fname}${fsize}</span></div>`;
+    }
+    if (t === 'share' && att.url) {
+      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">🔗 <a href="${escHtml(att.url)}" target="_blank" rel="noopener" style="text-decoration:underline;">${escHtml(att.url.slice(0,50))}${att.url.length>50?'…':''}</a></div>`;
+    }
+    return '';
+  }).join('');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' Б';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' КБ';
+  return (bytes / 1048576).toFixed(1) + ' МБ';
+}
+
+// ── Профиль пользователя ───────────────────────────────────────────────────
+
+async function openProfile() {
+  if (!currentUserId) return;
+  profileOpen = true;
+  document.getElementById('col-profile').classList.remove('hidden');
+  await loadProfile();
+}
+
+function closeProfile() {
+  profileOpen = false;
+  document.getElementById('col-profile').classList.add('hidden');
+}
+
+async function loadProfile() {
+  if (!currentUserId) return;
+  document.getElementById('profile-header').classList.add('hidden');
+  document.getElementById('profile-content').innerHTML =
+    '<div class="flex items-center justify-center py-12 text-gray-400 text-sm">Загрузка...</div>';
+
+  const res = await fetch(`/api/bots/${BOT_ID}/inbox/profile/${encodeURIComponent(currentUserId)}`);
+  if (!res.ok) {
+    document.getElementById('profile-content').innerHTML =
+      '<div class="text-center py-8 text-red-400 text-sm">Ошибка загрузки</div>';
+    return;
+  }
+  profileData = await res.json();
+  renderProfileHeader(profileData);
+  renderProfileTab(profileTab);
+}
+
+function renderProfileHeader(p) {
+  // Аватар
+  const avatarEl = document.getElementById('profile-avatar');
+  const bg = avatarColor(p.name || '');
+  if (p.avatar) {
+    avatarEl.innerHTML = `<img src="${escHtml(p.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.nextSibling.style.display='flex'">
+      <div style="display:none;width:100%;height:100%;background:${bg};color:#fff;align-items:center;justify-content:center;">${escHtml(initials(p.name))}</div>`;
+  } else {
+    avatarEl.style.background = bg;
+    avatarEl.style.color = '#fff';
+    avatarEl.textContent = initials(p.name);
+  }
+  document.getElementById('profile-name').textContent = p.name;
+  document.getElementById('profile-id').textContent = `ID: ${p.user_id}`;
+  const totalMsgs = (p.user_msg_count || 0) + (p.bot_msg_count || 0);
+  document.getElementById('profile-msg-count').textContent = totalMsgs;
+  const firstDt = new Date(p.first_contact);
+  document.getElementById('profile-first').textContent =
+    firstDt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  document.getElementById('profile-header').classList.remove('hidden');
+}
+
+function switchProfileTab(btn) {
+  document.querySelectorAll('.profile-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  profileTab = btn.dataset.tab;
+  if (profileData) renderProfileTab(profileTab);
+}
+
+function renderProfileTab(tab) {
+  const content = document.getElementById('profile-content');
+  if (!profileData) return;
+  const p = profileData;
+
+  if (tab === 'overview') {
+    let groupsHtml = '';
+    if (p.groups && p.groups.length) {
+      groupsHtml = `<div class="mt-3">
+        <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Группы</div>
+        ${p.groups.map(g => `<div class="flex items-center gap-2 py-1.5 text-sm text-gray-700">
+          <span class="w-5 h-5 bg-indigo-100 rounded flex items-center justify-center text-indigo-600 text-xs flex-shrink-0">👥</span>
+          ${escHtml(g.group_name)}
+        </div>`).join('')}
+      </div>`;
+    }
+    const lastDt = new Date(p.last_active);
+    content.innerHTML = `
+      <div class="px-4 py-3 space-y-1 text-sm">
+        <div class="flex justify-between py-1.5 border-b border-gray-50">
+          <span class="text-gray-500">Сообщений от пользователя</span>
+          <span class="font-medium text-gray-800">${p.user_msg_count}</span>
+        </div>
+        <div class="flex justify-between py-1.5 border-b border-gray-50">
+          <span class="text-gray-500">Ответов бота</span>
+          <span class="font-medium text-gray-800">${p.bot_msg_count}</span>
+        </div>
+        <div class="flex justify-between py-1.5 border-b border-gray-50">
+          <span class="text-gray-500">Последняя активность</span>
+          <span class="font-medium text-gray-800">${lastDt.toLocaleDateString('ru-RU', {day:'numeric',month:'short',year:'numeric'})}</span>
+        </div>
+        <div class="flex justify-between py-1.5">
+          <span class="text-gray-500">Вложений (медиа/файлы)</span>
+          <span class="font-medium text-gray-800">${(p.media||[]).length + (p.files||[]).length + (p.voices||[]).length}</span>
+        </div>
+        ${groupsHtml}
+      </div>`;
+    return;
+  }
+
+  if (tab === 'media') {
+    const items = p.media || [];
+    if (!items.length) {
+      content.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет медиа</div>';
+      return;
+    }
+    content.innerHTML = `<div class="media-grid p-2">
+      ${items.map(att => {
+        if (att.preview_url) {
+          return `<div class="media-thumb"><img src="${escHtml(att.preview_url)}" loading="lazy" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div class="type-icon" style="display:none">${att.type==='video'?'🎥':'📷'}</div></div>`;
+        }
+        return `<div class="media-thumb"><div class="type-icon">${att.type==='video'?'🎥':'📷'}</div></div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
+
+  if (tab === 'files') {
+    const items = p.files || [];
+    if (!items.length) {
+      content.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет файлов</div>';
+      return;
+    }
+    content.innerHTML = `<div class="divide-y divide-gray-50">
+      ${items.map(att => {
+        const dt = new Date(att.date);
+        const fname = att.filename || 'Файл';
+        const fsize = att.size ? formatSize(att.size) : '';
+        return `<div class="flex items-center gap-3 px-4 py-2.5">
+          <span class="text-xl flex-shrink-0">📎</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm text-gray-800 truncate">${escHtml(fname)}</div>
+            <div class="text-xs text-gray-400">${fsize ? fsize + ' · ' : ''}${dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
+
+  if (tab === 'voices') {
+    const items = p.voices || [];
+    if (!items.length) {
+      content.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет голосовых</div>';
+      return;
+    }
+    content.innerHTML = `<div class="divide-y divide-gray-50">
+      ${items.map(att => {
+        const dt = new Date(att.date);
+        return `<div class="flex items-center gap-3 px-4 py-2.5">
+          <span class="text-xl flex-shrink-0">🎤</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm text-gray-800">Голосовое сообщение</div>
+            <div class="text-xs text-gray-400">${dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})} · ${dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
+
+  if (tab === 'links') {
+    const items = p.links || [];
+    if (!items.length) {
+      content.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Нет ссылок</div>';
+      return;
+    }
+    content.innerHTML = `<div class="divide-y divide-gray-50">
+      ${items.map(lnk => {
+        const dt = new Date(lnk.date);
+        const domain = (() => { try { return new URL(lnk.url).hostname; } catch { return lnk.url.slice(0,30); } })();
+        return `<div class="px-4 py-2.5">
+          <a href="${escHtml(lnk.url)}" target="_blank" rel="noopener"
+             class="text-sm text-indigo-600 hover:underline block truncate" title="${escHtml(lnk.url)}">${escHtml(lnk.url)}</a>
+          <div class="text-xs text-gray-400 mt-0.5">${escHtml(domain)} · ${dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    return;
+  }
 }
 
 // ── Отправка ───────────────────────────────────────────────────────────────
@@ -397,11 +663,9 @@ async function sendMessage() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   if (!text) return;
-
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
   input.disabled = true;
-
   try {
     const res = await fetch(`/api/bots/${BOT_ID}/inbox/send`, {
       method: 'POST',
@@ -425,10 +689,7 @@ async function sendMessage() {
 }
 
 function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
 
 function autoResize(el) {
@@ -440,14 +701,17 @@ function resetChat() {
   currentUserId = null;
   currentUserName = '';
   currentUserAvatar = null;
+  profileData = null;
   document.getElementById('chat-avatar-wrap').classList.add('hidden');
   document.getElementById('chat-name').textContent = 'Выберите чат';
   document.getElementById('chat-sub').textContent = '';
   document.getElementById('refresh-btn').classList.add('hidden');
+  document.getElementById('chat-header-profile-btn').disabled = true;
   document.getElementById('msg-input').disabled = true;
   document.getElementById('send-btn').disabled = true;
   document.getElementById('messages-area').innerHTML =
     '<div class="flex items-center justify-center h-full text-gray-400 text-sm">Выберите пользователя слева</div>';
+  closeProfile();
 }
 
 // ── Мобильная навигация ────────────────────────────────────────────────────
@@ -459,6 +723,7 @@ function showGroupsOnMobile() {
   document.getElementById('col-groups').style.display = '';
   document.getElementById('col-users').style.display = 'none';
   document.getElementById('col-chat').style.display = 'none';
+  document.getElementById('col-profile').classList.add('hidden');
 }
 
 function showUsersOnMobile() {
@@ -466,6 +731,7 @@ function showUsersOnMobile() {
   document.getElementById('col-groups').style.display = 'none';
   document.getElementById('col-users').style.display = '';
   document.getElementById('col-chat').style.display = 'none';
+  document.getElementById('col-profile').classList.add('hidden');
   document.getElementById('back-to-groups').classList.remove('hidden');
 }
 
@@ -499,15 +765,10 @@ function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function truncate(s, n) {
-  return s.length > n ? s.slice(0, n) + '…' : s;
-}
-
 function initials(name) {
   return String(name || '?').slice(0, 2).toUpperCase();
 }
 
-// Генерируем стабильный цвет фона по строке
 const AVATAR_COLORS = ['#5b7fd4','#7b5ea7','#4a9e7f','#c0713a','#a84b6a','#4a7a9b','#7a6b4a'];
 function avatarColor(str) {
   let h = 0;
@@ -540,47 +801,41 @@ function formatTime(isoStr) {
 // ── Resize колонок ────────────────────────────────────────────────────────
 
 const RESIZE_LIMITS = {
-  groups: { min: 56,  max: 240 },
-  users:  { min: 200, max: 600 },
+  groups:  { min: 56,  max: 240 },
+  users:   { min: 200, max: 600 },
+  profile: { min: 240, max: 500 },
 };
 
 function loadColumnWidths() {
-  const wg = parseInt(localStorage.getItem('inbox-w-groups') || '', 10);
-  const wu = parseInt(localStorage.getItem('inbox-w-users')  || '', 10);
-  if (wg && wg >= RESIZE_LIMITS.groups.min && wg <= RESIZE_LIMITS.groups.max) {
-    document.getElementById('col-groups').style.width = wg + 'px';
-  }
-  if (wu && wu >= RESIZE_LIMITS.users.min && wu <= RESIZE_LIMITS.users.max) {
-    document.getElementById('col-users').style.width = wu + 'px';
-  }
+  const wg = parseInt(localStorage.getItem('inbox-w-groups')  || '', 10);
+  const wu = parseInt(localStorage.getItem('inbox-w-users')   || '', 10);
+  const wp = parseInt(localStorage.getItem('inbox-w-profile') || '', 10);
+  if (wg && wg >= RESIZE_LIMITS.groups.min  && wg <= RESIZE_LIMITS.groups.max)  document.getElementById('col-groups').style.width  = wg + 'px';
+  if (wu && wu >= RESIZE_LIMITS.users.min   && wu <= RESIZE_LIMITS.users.max)   document.getElementById('col-users').style.width   = wu + 'px';
+  if (wp && wp >= RESIZE_LIMITS.profile.min && wp <= RESIZE_LIMITS.profile.max) document.getElementById('col-profile').style.width = wp + 'px';
 }
 
 function setupResize(handleId, colId, storageKey, limits) {
   const handle = document.getElementById(handleId);
-  const col = document.getElementById(colId);
+  const col    = document.getElementById(colId);
   if (!handle || !col) return;
-
-  let startX = 0;
-  let startW = 0;
-
+  let startX = 0, startW = 0;
   function onMove(e) {
     const x = e.touches ? e.touches[0].clientX : e.clientX;
-    let w = startW + (x - startX);
-    if (w < limits.min) w = limits.min;
-    if (w > limits.max) w = limits.max;
+    // Для правой панели — resize в обратную сторону
+    const delta = colId === 'col-profile' ? (startX - x) : (x - startX);
+    let w = Math.max(limits.min, Math.min(limits.max, startW + delta));
     col.style.width = w + 'px';
   }
-
   function onUp() {
     handle.classList.remove('dragging');
     document.body.classList.remove('col-resizing');
     document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('mouseup',   onUp);
     document.removeEventListener('touchmove', onMove);
-    document.removeEventListener('touchend', onUp);
+    document.removeEventListener('touchend',  onUp);
     localStorage.setItem(storageKey, parseInt(col.style.width, 10));
   }
-
   function onDown(e) {
     if (window.innerWidth < 768) return;
     e.preventDefault();
@@ -589,24 +844,23 @@ function setupResize(handleId, colId, storageKey, limits) {
     handle.classList.add('dragging');
     document.body.classList.add('col-resizing');
     document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('mouseup',   onUp);
     document.addEventListener('touchmove', onMove, { passive: false });
-    document.addEventListener('touchend', onUp);
+    document.addEventListener('touchend',  onUp);
   }
-
-  handle.addEventListener('mousedown', onDown);
+  handle.addEventListener('mousedown',  onDown);
   handle.addEventListener('touchstart', onDown, { passive: false });
-
-  // Двойной клик — сбросить к дефолту
   handle.addEventListener('dblclick', () => {
-    col.style.width = (colId === 'col-groups' ? 64 : 288) + 'px';
+    const defaults = { 'col-groups': 64, 'col-users': 288, 'col-profile': 320 };
+    col.style.width = (defaults[colId] || 288) + 'px';
     localStorage.removeItem(storageKey);
   });
 }
 
 loadColumnWidths();
-setupResize('resize-handle-1', 'col-groups', 'inbox-w-groups', RESIZE_LIMITS.groups);
-setupResize('resize-handle-2', 'col-users',  'inbox-w-users',  RESIZE_LIMITS.users);
+setupResize('resize-handle-1', 'col-groups',  'inbox-w-groups',  RESIZE_LIMITS.groups);
+setupResize('resize-handle-2', 'col-users',   'inbox-w-users',   RESIZE_LIMITS.users);
+setupResize('resize-handle-3', 'col-profile', 'inbox-w-profile', RESIZE_LIMITS.profile);
 
 applyLayout();
 init();

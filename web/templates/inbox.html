@@ -33,6 +33,17 @@
     .att-file { display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(0,0,0,.06); border-radius:8px; margin-top:4px; font-size:12px; }
     .att-audio { display:flex; align-items:center; gap:6px; padding:6px 10px; background:rgba(0,0,0,.06); border-radius:8px; margin-top:4px; font-size:12px; }
     .att-video { max-width:220px; border-radius:10px; overflow:hidden; margin-top:4px; }
+    /* pending attachments & emoji picker */
+    #pending-atts { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px 0; }
+    .pending-att-wrap { position:relative; width:60px; height:60px; border-radius:10px; overflow:hidden; background:#e5e7eb; flex-shrink:0; }
+    .pending-att-wrap img { width:100%; height:100%; object-fit:cover; }
+    .pending-att-icon { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:22px; }
+    .pending-att-overlay { position:absolute; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; }
+    .pending-att-remove { position:absolute; top:3px; right:3px; width:18px; height:18px; background:rgba(0,0,0,.55); border-radius:50%; color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; line-height:1; border:none; }
+    .pending-att-remove:hover { background:rgba(200,0,0,.8); }
+    #emoji-picker { position:absolute; bottom:calc(100% + 8px); right:0; width:276px; max-height:240px; overflow-y:auto; background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,.12); padding:8px; z-index:50; }
+    #emoji-grid button { width:30px; height:30px; font-size:18px; border:none; background:none; cursor:pointer; border-radius:6px; display:flex; align-items:center; justify-content:center; }
+    #emoji-grid button:hover { background:#f3f4f6; }
     @media (max-width: 767px) { .resize-handle { display:none; } }
   </style>
 </head>
@@ -143,18 +154,47 @@
     </div>
 
     <!-- Инпут -->
-    <div class="bg-white border-t border-gray-200 px-4 py-3 shrink-0">
-      <div class="flex gap-2 items-end">
+    <div class="bg-white border-t border-gray-200 shrink-0">
+      <!-- Превью pending-вложений -->
+      <div id="pending-atts" class="hidden"></div>
+
+      <div class="flex gap-2 items-end px-4 py-3">
+        <!-- Кнопка прикрепить файл -->
+        <button id="attach-btn" onclick="triggerFileInput()" title="Прикрепить файл"
+                class="shrink-0 w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                disabled>
+          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+          </svg>
+        </button>
+        <input id="file-input" type="file" class="hidden" multiple
+               accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.7z"
+               onchange="handleFileSelect(event)">
+
+        <!-- Текстовый инпут -->
         <textarea id="msg-input" rows="1"
                   placeholder="Написать сообщение..."
                   onkeydown="handleKey(event)"
-                  oninput="autoResize(this)"
+                  oninput="autoResize(this); updateSendBtn();"
                   class="flex-1 resize-none px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 max-h-32 overflow-y-auto"
                   disabled></textarea>
+
+        <!-- Кнопка эмодзи + пикер -->
+        <div class="relative shrink-0">
+          <button id="emoji-btn" onclick="toggleEmojiPicker(event)" title="Эмодзи"
+                  class="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-lg transition-colors"
+                  disabled>😊</button>
+          <div id="emoji-picker" class="hidden">
+            <div id="emoji-grid"></div>
+          </div>
+        </div>
+
+        <!-- Отправить -->
         <button id="send-btn" onclick="sendMessage()"
-                class="shrink-0 w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-content: center transition-colors"
+                class="shrink-0 w-9 h-9 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
                 disabled>
-          <svg class="w-4 h-4 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
           </svg>
@@ -229,6 +269,7 @@ let profileOpen = false;
 // ── Инициализация ──────────────────────────────────────────────────────────
 
 async function init() {
+  buildEmojiPicker();
   await loadGroups();
   await loadUsers();
 }
@@ -366,8 +407,10 @@ function selectUser(u) {
   document.getElementById('chat-header-profile-btn').disabled = false;
 
   document.getElementById('msg-input').disabled = false;
-  document.getElementById('send-btn').disabled = false;
+  document.getElementById('attach-btn').disabled = false;
+  document.getElementById('emoji-btn').disabled = false;
   document.getElementById('msg-input').focus();
+  updateSendBtn();
 
   // Если профиль открыт — перезагружаем для нового пользователя
   if (profileOpen) loadProfile();
@@ -662,15 +705,30 @@ async function sendMessage() {
   if (!currentUserId) return;
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
-  if (!text) return;
+  const readyAtts = pendingAtts.filter(a => !a.uploading && !a.error && a.token);
+  if (!text && !readyAtts.length) return;
+
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
   input.disabled = true;
+  document.getElementById('attach-btn').disabled = true;
+  document.getElementById('emoji-btn').disabled = true;
+
+  const attachments = readyAtts.map(a => {
+    const o = { type: a.type, token: a.token, size: a.size };
+    if (a.filename) o.filename = a.filename;
+    return o;
+  });
+
   try {
     const res = await fetch(`/api/bots/${BOT_ID}/inbox/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: currentUserId, text }),
+      body: JSON.stringify({
+        user_id: currentUserId,
+        text,
+        attachments: attachments.length ? attachments : undefined,
+      }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -679,12 +737,16 @@ async function sendMessage() {
     }
     input.value = '';
     input.style.height = '';
+    clearPendingAtts();
     await loadMessages();
     await loadUsers();
   } finally {
     btn.disabled = false;
     input.disabled = false;
+    document.getElementById('attach-btn').disabled = false;
+    document.getElementById('emoji-btn').disabled = false;
     input.focus();
+    updateSendBtn();
   }
 }
 
@@ -702,17 +764,165 @@ function resetChat() {
   currentUserName = '';
   currentUserAvatar = null;
   profileData = null;
+  clearPendingAtts();
   document.getElementById('chat-avatar-wrap').classList.add('hidden');
   document.getElementById('chat-name').textContent = 'Выберите чат';
   document.getElementById('chat-sub').textContent = '';
   document.getElementById('refresh-btn').classList.add('hidden');
   document.getElementById('chat-header-profile-btn').disabled = true;
   document.getElementById('msg-input').disabled = true;
+  document.getElementById('attach-btn').disabled = true;
+  document.getElementById('emoji-btn').disabled = true;
   document.getElementById('send-btn').disabled = true;
+  document.getElementById('emoji-picker').classList.add('hidden');
   document.getElementById('messages-area').innerHTML =
     '<div class="flex items-center justify-center h-full text-gray-400 text-sm">Выберите пользователя слева</div>';
   closeProfile();
 }
+
+// ── Pending attachments ───────────────────────────────────────────────────
+
+let pendingAtts = []; // {id, type, token, filename, size, previewUrl, uploading, error}
+let _attIdSeq = 0;
+
+function triggerFileInput() {
+  document.getElementById('file-input').click();
+}
+
+function guessAttType(mime) {
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+async function handleFileSelect(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for (const file of files) {
+    if (file.size > 20 * 1024 * 1024) {
+      alert(`Файл "${file.name}" слишком большой (максимум 20 МБ)`);
+      continue;
+    }
+    const id = ++_attIdSeq;
+    const type = guessAttType(file.type);
+    const previewUrl = (type === 'image') ? URL.createObjectURL(file) : null;
+    const att = { id, type, filename: file.name, size: file.size, token: null, previewUrl, uploading: true, error: null };
+    pendingAtts.push(att);
+    renderPendingAtts();
+
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch(`/api/bots/${BOT_ID}/inbox/upload`, { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        att.error = err.detail || 'Ошибка загрузки';
+      } else {
+        const data = await res.json();
+        att.token = data.attachment.token;
+        att.type  = data.type;
+        if (data.attachment.filename) att.filename = data.attachment.filename;
+      }
+    } catch (_) {
+      att.error = 'Ошибка сети';
+    }
+    att.uploading = false;
+    renderPendingAtts();
+    updateSendBtn();
+  }
+}
+
+function removeAtt(id) {
+  const att = pendingAtts.find(a => a.id === id);
+  if (att?.previewUrl) URL.revokeObjectURL(att.previewUrl);
+  pendingAtts = pendingAtts.filter(a => a.id !== id);
+  renderPendingAtts();
+  updateSendBtn();
+}
+
+function clearPendingAtts() {
+  pendingAtts.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
+  pendingAtts = [];
+  renderPendingAtts();
+}
+
+function renderPendingAtts() {
+  const wrap = document.getElementById('pending-atts');
+  if (!pendingAtts.length) {
+    wrap.classList.add('hidden');
+    wrap.innerHTML = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  const ATT_ICONS = { image:'📷', video:'🎥', audio:'🎤', file:'📎' };
+  wrap.innerHTML = pendingAtts.map(att => {
+    const icon = ATT_ICONS[att.type] || '📎';
+    const thumb = (att.previewUrl)
+      ? `<img src="${escHtml(att.previewUrl)}" alt="">`
+      : `<div class="pending-att-icon">${icon}</div>`;
+    const overlay = att.uploading
+      ? `<div class="pending-att-overlay"><svg class="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg></div>`
+      : att.error
+      ? `<div class="pending-att-overlay" title="${escHtml(att.error)}" style="background:rgba(185,28,28,.55);"><span style="color:#fff;font-size:18px;">✕</span></div>`
+      : '';
+    return `<div class="pending-att-wrap">${thumb}${overlay}<button class="pending-att-remove" onclick="removeAtt(${att.id})" title="Убрать">✕</button></div>`;
+  }).join('');
+}
+
+function updateSendBtn() {
+  const btn = document.getElementById('send-btn');
+  const input = document.getElementById('msg-input');
+  if (!currentUserId || !btn || !input) return;
+  const hasText = input.value.trim().length > 0;
+  const hasReady = pendingAtts.some(a => !a.uploading && !a.error && a.token);
+  btn.disabled = !hasText && !hasReady;
+}
+
+// ── Эмодзи-пикер ──────────────────────────────────────────────────────────
+
+const EMOJIS = [
+  '😀','😂','🥰','😍','🤩','😎','😡','😢','😱','🤔',
+  '😴','🤗','🥺','😤','😆','🤣','😅','😁','😘','😏',
+  '😒','🙄','😑','🤫','🤭','😬','🤯','🥳','🤓','😇',
+  '👍','👎','👌','🙏','👏','💪','✌️','🤝','👋','🫶',
+  '🤜','🤛','🫂','💁','🙋','🤷','🤦','🤙','🤌','☝️',
+  '❤️','💔','💕','💯','🔥','⭐','✨','🎉','🎊','🎁',
+  '🎂','🏆','🥇','🎮','🎵','🎶','📱','💻','📷','🎥',
+  '🌍','☀️','🌈','❄️','🌸','🌺','🍀','🌿','🌙','⚡',
+  '🐶','🐱','🐻','🐼','🦊','🦁','🐰','🐸','🦄','🐝',
+  '🍕','🍔','🌮','🍜','🍣','🍰','🍎','🍓','☕','🍷',
+  '🚀','✈️','🚗','🏠','💎','📚','💡','👀','💬','📢',
+  '🔔','❓','❗','✅','❌','⚠️','🆗','💤','🔗','📌',
+];
+
+function buildEmojiPicker() {
+  const grid = document.getElementById('emoji-grid');
+  if (!grid) return;
+  grid.innerHTML = EMOJIS.map(em =>
+    `<button onclick="insertEmoji('${em}')" title="${em}">${em}</button>`
+  ).join('');
+}
+
+function toggleEmojiPicker(e) {
+  e.stopPropagation();
+  document.getElementById('emoji-picker').classList.toggle('hidden');
+}
+
+function insertEmoji(em) {
+  const ta = document.getElementById('msg-input');
+  const s = ta.selectionStart, end = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + em + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = s + em.length;
+  ta.focus();
+  autoResize(ta);
+  updateSendBtn();
+  document.getElementById('emoji-picker').classList.add('hidden');
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('emoji-picker')?.classList.add('hidden');
+});
 
 // ── Мобильная навигация ────────────────────────────────────────────────────
 

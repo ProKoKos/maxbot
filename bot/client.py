@@ -209,3 +209,20 @@ class MaxClient:
             await self._request("POST", "/chats/actions", params={"chat_id": chat_id}, json={"action": action})
         except MaxAPIError:
             pass
+
+    # ── Загрузка вложений ────────────────────────────────────────────────────
+
+    async def upload_attachment(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+        att_type: str,  # "photo" | "video" | "audio" | "file"
+    ) -> dict:
+        """Загружает файл в MAX через POST /uploads.
+
+        att_type: «photo» для изображений, «video», «audio», «file» для остальных.
+        Возвращает JSON ответа MAX — обычно {"token": "...", ...}.
+        """
+        files = {"data": (filename, file_bytes, content_type)}
+        return await self._request("POST", "/uploads", params={"type": att_type}, files=files)

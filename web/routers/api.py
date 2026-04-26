@@ -12,7 +12,7 @@ settings, Webhook, Inbox. Каждый ресурс соблюдает изол�
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func as sqlfunc, or_, select
@@ -1508,7 +1508,10 @@ async def inbox_profile(
 
 class InboxSendRequest(BaseModel):
     user_id: str
-    text: str
+    text: str = ""
+    # Вложения в «storage»-формате: [{type, token, filename?, size?}]
+    # Бэкенд конвертирует в MAX API-формат при отправке.
+    attachments: list[dict] | None = None
     assistant_config_id: int | None = None
 
 
@@ -1520,6 +1523,9 @@ async def inbox_send(
     session: DBSession,
     _: RateLimit,
 ):
+    if not body.text and not body.attachments:
+        raise HTTPException(400, "Either text or attachments must be provided")
+
     bot = await _require_bot_owner(bot_id, current_user.id, session)
 
     # Ищем реальный chat_id из истории сообщений пользователя
@@ -1541,9 +1547,23 @@ async def inbox_send(
     except ValueError:
         raise HTTPException(500, "Token decryption failed")
 
+    # Конвертируем storage-формат → MAX API-формат для отправки
+    max_atts: list[dict] | None = None
+    if body.attachments:
+        max_atts = [
+            {"type": att["type"], "payload": {"token": att["token"]}}
+            for att in body.attachments
+            if att.get("token")
+        ] or None
+
     async with MaxClient(token=token) as client:
         try:
-            await client.send_message(chat_id=chat_id, text=body.text, format="markdown")
+            await client.send_message(
+                chat_id=chat_id,
+                text=body.text or "",
+                attachments=max_atts,
+                format="markdown",
+            )
         except MaxAPIError as e:
             raise HTTPException(502, f"Max API error: {e}")
 
@@ -1553,11 +1573,74 @@ async def inbox_send(
         chat_id=chat_id,
         assistant_config_id=body.assistant_config_id,
         role="assistant",
-        content=body.text,
+        content=body.text or "",
+        attachments_json=json.dumps(body.attachments or [], ensure_ascii=False),
     )
     session.add(msg)
     await session.commit()
     await session.refresh(msg)
     return {"ok": True, "id": msg.id, "created_at": msg.created_at.isoformat()}
 
-    return {"ok": True}
+
+@router.post("/bots/{bot_id}/inbox/upload")
+async def inbox_upload(
+    bot_id: int,
+    file: UploadFile,
+    current_user: CurrentUser,
+    session: DBSession,
+    _: RateLimit,
+):
+    """Загружает файл в MAX API и возвращает токен вложения.
+
+    Клиент сначала вызывает этот эндпоинт (получает token),
+    потом передаёт token в /inbox/send в поле attachments.
+    Поддерживаемые типы: изображения, видео, аудио, произвольные файлы.
+    Максимальный размер: 20 МБ.
+    """
+    MAX_SIZE = 20 * 1024 * 1024  # 20 МБ
+
+    bot = await _require_bot_owner(bot_id, current_user.id, session)
+
+    try:
+        token = decrypt_token(bot.encrypted_token)
+    except ValueError:
+        raise HTTPException(500, "Token decryption failed")
+
+    ct = file.content_type or "application/octet-stream"
+    filename = file.filename or "file"
+
+    if ct.startswith("image/"):
+        att_type, store_type = "photo", "image"
+    elif ct.startswith("video/"):
+        att_type, store_type = "video", "video"
+    elif ct.startswith("audio/"):
+        att_type, store_type = "audio", "audio"
+    else:
+        att_type, store_type = "file", "file"
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_SIZE:
+        raise HTTPException(413, "Файл слишком большой (максимум 20 МБ)")
+
+    async with MaxClient(token=token) as client:
+        try:
+            result = await client.upload_attachment(file_bytes, filename, ct, att_type)
+        except MaxAPIError as e:
+            raise HTTPException(502, f"MAX API upload error: {e}")
+
+    upload_token = result.get("token") or result.get("file_id") or ""
+    if not upload_token:
+        raise HTTPException(502, f"MAX API не вернул token: {result}")
+
+    # storage-формат — то, что хранится в attachments_json и передаётся в /send
+    store_att: dict = {"type": store_type, "token": upload_token, "size": len(file_bytes)}
+    if store_type == "file":
+        store_att["filename"] = filename
+
+    return {
+        "ok": True,
+        "attachment": store_att,
+        "type": store_type,
+        "filename": filename,
+        "size": len(file_bytes),
+    }

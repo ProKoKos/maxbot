@@ -609,7 +609,13 @@ async def _handle_dm_message(
     message = update.get("message", {})
     sender = message.get("sender", {})
     max_user_id = str(sender.get("user_id", ""))
-    user_avatar = sender.get("avatar_url") or sender.get("avatar") or sender.get("photo") or None
+    _photo = sender.get("photo")
+    user_avatar = (
+        sender.get("avatar_url")
+        or sender.get("photo_url")
+        or (_photo.get("url") if isinstance(_photo, dict) else _photo)
+        or None
+    )
     chat = message.get("recipient", {})
     chat_id = str(chat.get("chat_id", "") or max_user_id)
     message_body = message.get("body", {})

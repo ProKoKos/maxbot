@@ -1106,7 +1106,13 @@ async def inbox_groups(bot_id: int, current_user: CurrentUser, session: DBSessio
             async def _fetch_icon(group_id: str) -> tuple[str, str | None]:
                 try:
                     data = await client.get_chat(group_id)
-                    icon = (data.get("icon") or {}).get("url") or data.get("avatar_url") or None
+                    _ic = data.get("icon")
+                    icon = (
+                        (_ic.get("url") if isinstance(_ic, dict) else _ic)
+                        or data.get("avatar_url")
+                        or data.get("photo_url")
+                        or None
+                    )
                     return group_id, icon
                 except MaxAPIError:
                     return group_id, None
@@ -1186,59 +1192,80 @@ async def inbox_users(
             names[uid] = uname
 
     # берём аватар из сохранённых сообщений; если нет — идём в MAX API
+    import logging as _logging
+    _avatar_log = _logging.getLogger("web.api.inbox")
+
     stored_avatars: dict[str, str | None] = {}
-    first_user_msg: dict[str, ConversationMessage] = {}
-    for msg in reversed(all_msgs):  # reversed → самое раннее сообщение окажется в dict последним
-        if msg.max_user_id not in stored_avatars:
-            stored_avatars[msg.max_user_id] = None
-        if msg.user_avatar:
-            stored_avatars[msg.max_user_id] = msg.user_avatar
-        if msg.role == "user":
-            first_user_msg[msg.max_user_id] = msg
+    last_user_msg: dict[str, ConversationMessage] = {}
+    for msg in all_msgs:  # DESC: первый встреченный per user — самый свежий
+        uid = msg.max_user_id
+        if uid not in stored_avatars:
+            # При первой встрече инициализируем; user_avatar берём из самого свежего сообщения
+            stored_avatars[uid] = msg.user_avatar or None
+        elif msg.user_avatar and not stored_avatars[uid]:
+            # Более старое сообщение содержит аватар — подхватываем
+            stored_avatars[uid] = msg.user_avatar
+        if msg.role == "user" and uid not in last_user_msg:
+            last_user_msg[uid] = msg
 
     missing = [uid for uid in user_ids if not stored_avatars.get(uid)]
     if missing:
         try:
             import asyncio
             token = decrypt_token(bot.encrypted_token)
+
+            def _url_from(data: dict, *fields: str) -> str | None:
+                """Извлекает URL из dict по нескольким возможным именам полей.
+                Поле может быть строкой-URL или dict{"url": ...}."""
+                for f in fields:
+                    v = data.get(f)
+                    if isinstance(v, dict):
+                        u = v.get("url")
+                        if u:
+                            return u
+                    elif isinstance(v, str) and v:
+                        return v
+                return None
+
             async with MaxClient(token=token) as client:
                 async def _fetch_avatar(uid: str) -> tuple[str, str | None]:
-                    # Сначала пробуем /users/{uid}
+                    # 1. /users/{uid}
                     try:
                         data = await client.get_user(uid)
-                        url = (
-                            data.get("avatar_url")
-                            or data.get("photo_url")
-                            or (data.get("photo") or {}).get("url")
-                            or None
-                        )
+                        url = _url_from(data, "avatar_url", "photo_url", "photo", "avatar")
                         if url:
                             return uid, url
                     except MaxAPIError:
                         pass
-                    # Фолбэк: иконка DM-чата пользователя — равна аватару в MAX
-                    fmsg = first_user_msg.get(uid)
-                    if fmsg and fmsg.chat_id:
+                    # 2. DM-чат из последнего сообщения пользователя
+                    chat_ids: list[str] = []
+                    fmsg = last_user_msg.get(uid)
+                    if fmsg and fmsg.chat_id and fmsg.chat_id != uid:
+                        chat_ids.append(fmsg.chat_id)
+                    # 3. В MAX DM chat_id зачастую == user_id — пробуем напрямую
+                    chat_ids.append(uid)
+                    for cid in chat_ids:
                         try:
-                            data = await client.get_chat(fmsg.chat_id)
-                            url = (data.get("icon") or {}).get("url") or None
-                            return uid, url
+                            data = await client.get_chat(cid)
+                            url = _url_from(data, "icon", "avatar_url", "photo_url", "photo", "avatar")
+                            if url:
+                                return uid, url
                         except MaxAPIError:
                             pass
                     return uid, None
 
                 fetched = dict(await asyncio.gather(*[_fetch_avatar(uid) for uid in missing]))
 
-            # кешируем в БД на первом сообщении пользователя, где avatar ещё не стоит
+            # Кешируем в БД в самое свежее сообщение пользователя, где avatar ещё не стоит
             for uid, url in fetched.items():
                 if url:
                     stored_avatars[uid] = url
-                    msg_to_update = first_user_msg.get(uid)
+                    msg_to_update = last_user_msg.get(uid)
                     if msg_to_update and not msg_to_update.user_avatar:
                         msg_to_update.user_avatar = url
             await session.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            _avatar_log.warning("Avatar fetch failed for bot %s: %s", bot_id, exc)
 
     # Кол-во непрочитанных сообщений per user
     unread_result = await session.execute(

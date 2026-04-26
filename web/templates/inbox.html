@@ -34,7 +34,8 @@
     .att-audio { display:flex; align-items:center; gap:6px; padding:6px 10px; background:rgba(0,0,0,.06); border-radius:8px; margin-top:4px; font-size:12px; }
     .att-video { max-width:220px; border-radius:10px; overflow:hidden; margin-top:4px; }
     /* pending attachments & emoji picker */
-    #pending-atts { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px 0; }
+    #pending-atts { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px 0; align-items:flex-start; }
+    .pending-att-error-text { font-size:9px; color:#ef4444; text-align:center; max-width:60px; word-break:break-all; line-height:1.2; margin-top:2px; }
     .pending-att-wrap { position:relative; width:60px; height:60px; border-radius:10px; overflow:hidden; background:#e5e7eb; flex-shrink:0; }
     .pending-att-wrap img { width:100%; height:100%; object-fit:cover; }
     .pending-att-icon { width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:22px; }
@@ -42,6 +43,7 @@
     .pending-att-remove { position:absolute; top:3px; right:3px; width:18px; height:18px; background:rgba(0,0,0,.55); border-radius:50%; color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; line-height:1; border:none; }
     .pending-att-remove:hover { background:rgba(200,0,0,.8); }
     #emoji-picker { position:absolute; bottom:calc(100% + 8px); right:0; width:276px; max-height:240px; overflow-y:auto; background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,.12); padding:8px; z-index:50; }
+    #emoji-grid { display:flex; flex-wrap:wrap; gap:2px; }
     #emoji-grid button { width:30px; height:30px; font-size:18px; border:none; background:none; cursor:pointer; border-radius:6px; display:flex; align-items:center; justify-content:center; }
     #emoji-grid button:hover { background:#f3f4f6; }
     @media (max-width: 767px) { .resize-handle { display:none; } }
@@ -817,7 +819,8 @@ async function handleFileSelect(e) {
       const res = await fetch(`/api/bots/${BOT_ID}/inbox/upload`, { method: 'POST', body: fd });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        att.error = err.detail || 'Ошибка загрузки';
+        att.error = err.detail || `HTTP ${res.status}`;
+        console.error('Upload error', res.status, err);
       } else {
         const data = await res.json();
         att.token = data.attachment.token;
@@ -866,7 +869,10 @@ function renderPendingAtts() {
       : att.error
       ? `<div class="pending-att-overlay" title="${escHtml(att.error)}" style="background:rgba(185,28,28,.55);"><span style="color:#fff;font-size:18px;">✕</span></div>`
       : '';
-    return `<div class="pending-att-wrap">${thumb}${overlay}<button class="pending-att-remove" onclick="removeAtt(${att.id})" title="Убрать">✕</button></div>`;
+    const errorText = att.error
+      ? `<div class="pending-att-error-text">${escHtml(att.error.slice(0, 80))}</div>`
+      : '';
+    return `<div style="display:flex;flex-direction:column;align-items:center;"><div class="pending-att-wrap">${thumb}${overlay}<button class="pending-att-remove" onclick="removeAtt(${att.id})" title="Убрать">✕</button></div>${errorText}</div>`;
   }).join('');
 }
 

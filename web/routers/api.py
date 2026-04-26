@@ -1622,11 +1622,18 @@ async def inbox_upload(
     if len(file_bytes) > MAX_SIZE:
         raise HTTPException(413, "Файл слишком большой (максимум 20 МБ)")
 
+    import logging as _upload_log
+    _ul = _upload_log.getLogger("web.api.inbox.upload")
+
     async with MaxClient(token=token) as client:
         try:
             result = await client.upload_attachment(file_bytes, filename, ct, att_type)
         except MaxAPIError as e:
-            raise HTTPException(502, f"MAX API upload error: {e}")
+            _ul.error(
+                "MAX upload failed bot=%s att_type=%s filename=%s status=%s body=%r",
+                bot_id, att_type, filename, e.status, e.body,
+            )
+            raise HTTPException(502, f"MAX API upload error (status {e.status}): {e.body}")
 
     upload_token = result.get("token") or result.get("file_id") or ""
     if not upload_token:

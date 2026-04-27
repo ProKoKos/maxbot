@@ -636,15 +636,10 @@ async def _handle_dm_message(
 
     # Обновляем профиль пользователя при каждом входящем сообщении —
     # так данные всегда актуальны (имя, фамилия, @username, биография, аватар).
-    logger.info("DM sender raw: %s", json.dumps(sender, ensure_ascii=False))
-    logger.info("DM chat raw: %s", json.dumps(chat, ensure_ascii=False))
-    try:
-        _chat_info = await client.get_chat(chat_id)
-        logger.info("GET /chats/%s: %s", chat_id, json.dumps(_chat_info, ensure_ascii=False))
-    except Exception as _e:
-        logger.info("GET /chats/%s failed: %s", chat_id, _e)
+    # Обновляем профиль пользователя при каждом входящем сообщении —
+    # так данные всегда актуальны (имя, фамилия, биография, аватар).
     if max_user_id and bot_id is not None:
-        await _upsert_user_profile(session, bot_id, max_user_id, sender, client)
+        await _upsert_user_profile(session, bot_id, max_user_id, sender, client, chat_id)
 
     # Пропускаем только если нет ни текста, ни вложений (пустой апдейт)
     if not max_user_id or (not text and not attachments) or bot_id is None:
@@ -985,15 +980,18 @@ async def _upsert_user_profile(
     max_user_id: str,
     sender: dict,
     client: MaxClient,
+    chat_id: str = "",
 ) -> None:
-    """Создаёт или обновляет профиль пользователя через GET /users/{user_id}.
+    """Создаёт или обновляет профиль пользователя через GET /chats/{chat_id}.
 
     MAX Bot API не отдаёт полный профиль в ``sender`` DM-события —
-    там присутствуют только user_id и name. Полные данные (last_name,
-    username, description, avatar_url, full_avatar_url) доступны только
-    через явный запрос ``GET /users/{user_id}``.
+    там присутствуют только user_id, first_name и last_name.
+    Полные данные (description, avatar_url, full_avatar_url) доступны
+    через ``GET /chats/{chat_id}`` → поле ``dialog_with_user``.
 
-    Кеш: API не вызывается, если профиль уже был обновлён менее часа назад.
+    Эндпоинт GET /users/{user_id} в MAX Bot API отсутствует (404).
+
+    Кеш: API не вызывается, если профиль обновлён менее часа назад.
     Fallback: если API вернул ошибку — используем поля из ``sender``.
 
     Не делает commit — вызывается до основного session.commit() хендлера.
@@ -1016,15 +1014,19 @@ async def _upsert_user_profile(
         or (now - profile.last_synced_at) >= _PROFILE_REFRESH_INTERVAL
     )
 
-    # Пробуем получить полный профиль через API
+    # Пробуем получить полный профиль через GET /chats/{chat_id} → dialog_with_user.
+    # GET /users/{user_id} в MAX Bot API не существует (404).
     user_data: dict = {}
     if needs_api_call:
-        try:
-            user_data = await client.get_user(max_user_id)
-            logger.debug("Got user profile from API for %s: %s", max_user_id, user_data)
-        except Exception as exc:
-            logger.warning("Could not fetch user profile for %s: %s", max_user_id, exc)
-            # Fallback: данные из sender (могут быть неполными)
+        if chat_id:
+            try:
+                chat_info = await client.get_chat(chat_id)
+                user_data = chat_info.get("dialog_with_user") or {}
+                logger.debug("Got user profile from chat for %s", max_user_id)
+            except Exception as exc:
+                logger.warning("Could not fetch chat info for profile %s: %s", max_user_id, exc)
+        # Fallback: данные из sender (могут быть неполными)
+        if not user_data:
             user_data = sender
 
     # Если API не вызывали — ничего не меняем в профиле кроме полей от sender

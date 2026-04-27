@@ -635,9 +635,9 @@ async def _handle_dm_message(
     attachments = _extract_dm_attachments(message_body)
 
     # Обновляем профиль пользователя при каждом входящем сообщении —
-    # так данные всегда актуальны (имя, фамилия, @username, биография).
+    # так данные всегда актуальны (имя, фамилия, @username, биография, аватар).
     if max_user_id and bot_id is not None:
-        await _upsert_user_profile(session, bot_id, max_user_id, sender)
+        await _upsert_user_profile(session, bot_id, max_user_id, sender, client)
 
     # Пропускаем только если нет ни текста, ни вложений (пустой апдейт)
     if not max_user_id or (not text and not attachments) or bot_id is None:
@@ -969,40 +969,29 @@ async def _delete_if_unverified(
 
 # ── Вспомогательные функции ──────────────────────────────────────────────────
 
+_PROFILE_REFRESH_INTERVAL = timedelta(hours=1)
+
+
 async def _upsert_user_profile(
     session: AsyncSession,
     bot_id: int,
     max_user_id: str,
     sender: dict,
+    client: MaxClient,
 ) -> None:
-    """Создаёт или обновляет профиль пользователя по данным из sender-объекта DM.
+    """Создаёт или обновляет профиль пользователя через GET /users/{user_id}.
 
-    Вызывается при каждом входящем DM — данные всегда актуальны.
-    MAX Bot API возвращает в ``sender``:
-      first_name, last_name, username, description, avatar_url, full_avatar_url.
+    MAX Bot API не отдаёт полный профиль в ``sender`` DM-события —
+    там присутствуют только user_id и name. Полные данные (last_name,
+    username, description, avatar_url, full_avatar_url) доступны только
+    через явный запрос ``GET /users/{user_id}``.
+
+    Кеш: API не вызывается, если профиль уже был обновлён менее часа назад.
+    Fallback: если API вернул ошибку — используем поля из ``sender``.
 
     Не делает commit — вызывается до основного session.commit() хендлера.
     """
-    # Извлекаем все доступные поля. MAX API иногда объединяет имя в «name»,
-    # поэтому используем first_name как приоритет, fallback на «name».
-    first_name: str | None = (
-        sender.get("first_name")
-        or sender.get("name")
-        or None
-    )
-    last_name: str | None = sender.get("last_name") or None
-    username: str | None = sender.get("username") or None
-    description: str | None = sender.get("description") or None
-
-    # Аватар: MAX отдаёт несколько вариантов поля
-    _photo = sender.get("photo")
-    avatar_url: str | None = (
-        sender.get("avatar_url")
-        or sender.get("photo_url")
-        or (_photo.get("url") if isinstance(_photo, dict) else _photo)
-        or None
-    )
-    full_avatar_url: str | None = sender.get("full_avatar_url") or None
+    now = datetime.now(timezone.utc)
 
     existing = await session.execute(
         select(UserProfile).where(
@@ -1012,9 +1001,58 @@ async def _upsert_user_profile(
     )
     profile = existing.scalar_one_or_none()
 
+    # Определяем, нужно ли идти в API.
+    # Если профиль свежий (< 1 часа) — используем данные из sender как было.
+    needs_api_call = (
+        profile is None
+        or profile.last_synced_at is None
+        or (now - profile.last_synced_at) >= _PROFILE_REFRESH_INTERVAL
+    )
+
+    # Пробуем получить полный профиль через API
+    user_data: dict = {}
+    if needs_api_call:
+        try:
+            user_data = await client.get_user(max_user_id)
+            logger.debug("Got user profile from API for %s: %s", max_user_id, user_data)
+        except Exception as exc:
+            logger.warning("Could not fetch user profile for %s: %s", max_user_id, exc)
+            # Fallback: данные из sender (могут быть неполными)
+            user_data = sender
+
+    # Если API не вызывали — ничего не меняем в профиле кроме полей от sender
+    # (только первое имя, оно обычно приходит)
+    if not needs_api_call:
+        if profile:
+            # Обновляем только first_name из sender — другие поля могут отсутствовать
+            first_name_raw = sender.get("first_name") or sender.get("name") or None
+            if first_name_raw and profile.first_name != first_name_raw:
+                profile.first_name = first_name_raw
+        return
+
+    # Извлекаем поля из полного ответа API
+    first_name: str | None = (
+        user_data.get("first_name")
+        or user_data.get("name")
+        or None
+    )
+    last_name: str | None = user_data.get("last_name") or None
+    username: str | None = user_data.get("username") or None
+    description: str | None = user_data.get("description") or None
+
+    # Аватар: MAX отдаёт несколько вариантов поля в зависимости от контекста
+    _photo = user_data.get("photo")
+    avatar_url: str | None = (
+        user_data.get("avatar_url")
+        or user_data.get("photo_url")
+        or (_photo.get("url") if isinstance(_photo, dict) else _photo)
+        or None
+    )
+    full_avatar_url: str | None = user_data.get("full_avatar_url") or None
+
     if profile:
         # Обновляем только поля, которые пришли непустыми, —
-        # чтобы не затирать старые данные «пустышками» при неполных апдейтах.
+        # чтобы не затирать старые данные «пустышками» при неполных ответах.
         if first_name is not None:
             profile.first_name = first_name
         if last_name is not None:
@@ -1027,7 +1065,7 @@ async def _upsert_user_profile(
             profile.avatar_url = avatar_url
         if full_avatar_url is not None:
             profile.full_avatar_url = full_avatar_url
-        profile.last_synced_at = datetime.now(timezone.utc)
+        profile.last_synced_at = now
     else:
         session.add(UserProfile(
             bot_id=bot_id,

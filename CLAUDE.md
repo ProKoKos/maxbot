@@ -22,4 +22,4 @@ ssh wmoc-prod "cd ~/maxbot && git pull && docker compose build --no-cache && doc
 - `WelcomeConfig` имеет приоритет над `ChannelGroupPair` при верификации
 - `group_link` fallback: MAX API → `ChannelGroupPair.group_link` → ручной ввод
 - Токены ботов шифруются Fernet (`ENCRYPTION_KEY` из `.env`)
-- Коммиты без `Co-Authored-By` — не добавлять эту строку
+- **Никогда** не добавлять `Co-Authored-By:` в сообщения коммитов

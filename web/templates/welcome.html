@@ -77,7 +77,10 @@
         </td>
         <td class="px-4 py-3">
           {% if cfg.bot_name %}
-            <span class="text-gray-700">{{ cfg.bot_name }}</span>
+            <div class="font-medium text-gray-800">{{ cfg.bot_name }}</div>
+            {% if cfg.bot_username %}
+            <div class="text-xs text-gray-400">{{ cfg.bot_username }}</div>
+            {% endif %}
           {% else %}
             <span class="text-red-400 text-xs">⚠ Нет бота</span>
           {% endif %}

@@ -1739,10 +1739,10 @@ async def inbox_upload(
 @router.get("/bots/{bot_id}/inbox/proxy")
 async def inbox_proxy_download(
     bot_id: int,
-    url: str,
-    filename: str | None = None,
     current_user: CurrentUser,
     session: DBSession,
+    url: str,
+    filename: str | None = None,
 ):
     """Прокси-скачивание файла с MAX CDN с правильным Content-Disposition.
 

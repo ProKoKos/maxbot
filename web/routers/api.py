@@ -1578,7 +1578,9 @@ async def inbox_send(
             or max_resp.get("body", {})
         )
         resp_atts = resp_body.get("attachments", []) if isinstance(resp_body, dict) else []
-        _ul.info("inbox_send MAX response atts bot=%s resp_atts=%r", bot_id, resp_atts)
+        import logging as _sl; _sl.getLogger("web.api.inbox.send").info(
+            "inbox_send MAX response atts bot=%s resp_atts=%r", bot_id, resp_atts
+        )
         for i, stored_att in enumerate(atts_to_store):
             if stored_att.get("type") != "image":
                 continue

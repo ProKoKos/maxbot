@@ -23,7 +23,7 @@ from db.models import Base, Subscription, User
 from db.session import AsyncSessionLocal, async_engine
 from shared.config import get_settings
 from web.auth import hash_password
-from web.routers import api, pages
+from web.routers import api, pages, pages_coming_soon
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +44,7 @@ app.mount("/static", StaticFiles(directory="/app/web/static"), name="static")
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(pages.router)
+app.include_router(pages_coming_soon.router)
 app.include_router(api.router)
 
 

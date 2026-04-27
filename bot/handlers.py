@@ -636,6 +636,7 @@ async def _handle_dm_message(
 
     # Обновляем профиль пользователя при каждом входящем сообщении —
     # так данные всегда актуальны (имя, фамилия, @username, биография, аватар).
+    logger.info("DM sender raw: %s", json.dumps(sender, ensure_ascii=False))
     if max_user_id and bot_id is not None:
         await _upsert_user_profile(session, bot_id, max_user_id, sender, client)
 

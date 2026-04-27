@@ -217,12 +217,28 @@ class MaxClient:
         file_bytes: bytes,
         filename: str,
         content_type: str,
-        att_type: str,  # "photo" | "video" | "audio" | "file"
+        att_type: str,  # "image" | "video" | "audio" | "file"
     ) -> dict:
-        """Загружает файл в MAX через POST /uploads.
+        """Двухшаговая загрузка файла в MAX Bot API.
 
-        att_type: «photo» для изображений, «video», «audio», «file» для остальных.
-        Возвращает JSON ответа MAX — обычно {"token": "...", ...}.
+        Шаг 1: POST /uploads?type=... (без тела файла) → {"url": "https://iu.oneme.ru/..."}.
+        Шаг 2: POST файла на pre-signed URL (другой домен, без auth-заголовка) → {"token": "..."}.
+
+        att_type: "image" для изображений, "video", "audio", "file" для остальных.
         """
+        # Шаг 1 — запрашиваем pre-signed URL (файл не передаём)
+        upload_info = await self._request("POST", "/uploads", params={"type": att_type})
+        upload_url = upload_info.get("url")
+        if not upload_url:
+            raise MaxAPIError(200, f"MAX /uploads не вернул url: {upload_info}")
+
+        # Шаг 2 — загружаем файл на pre-signed URL (другой домен, без auth-заголовка)
         files = {"data": (filename, file_bytes, content_type)}
-        return await self._request("POST", "/uploads", params={"type": att_type}, files=files)
+        async with httpx.AsyncClient(timeout=60.0) as upload_client:
+            resp = await upload_client.post(upload_url, files=files)
+        if resp.status_code >= 400:
+            raise MaxAPIError(resp.status_code, resp.text)
+        try:
+            return resp.json()
+        except Exception:
+            raise MaxAPIError(resp.status_code, f"Non-JSON response: {resp.text[:300]}")

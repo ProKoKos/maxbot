@@ -1609,8 +1609,9 @@ async def inbox_upload(
     ct = file.content_type or "application/octet-stream"
     filename = file.filename or "file"
 
+    # MAX API принимает type=image|video|audio|file (не "photo")
     if ct.startswith("image/"):
-        att_type, store_type = "photo", "image"
+        att_type, store_type = "image", "image"
     elif ct.startswith("video/"):
         att_type, store_type = "video", "video"
     elif ct.startswith("audio/"):

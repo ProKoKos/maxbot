@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Чаты — {{ bot.name }}</title>
   <link rel="stylesheet" href="/static/tailwind.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js" crossorigin="anonymous"></script>
   <style>
     .col-groups { background: #2b2b3b; }
     .group-nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px; border-radius:10px; cursor:pointer; transition:background .15s; width:calc(100% - 8px); }
@@ -44,8 +45,9 @@
     .pending-att-remove:hover { background:rgba(200,0,0,.8); }
     #emoji-picker { position:absolute; bottom:calc(100% + 8px); right:0; width:276px; max-height:240px; overflow-y:auto; background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,.12); padding:8px; z-index:50; }
     #emoji-grid { display:flex; flex-wrap:wrap; gap:2px; }
-    #emoji-grid button { width:30px; height:30px; font-size:18px; border:none; background:none; cursor:pointer; border-radius:6px; display:flex; align-items:center; justify-content:center; }
+    #emoji-grid button { width:32px; height:32px; font-size:18px; border:none; background:none; cursor:pointer; border-radius:6px; display:flex; align-items:center; justify-content:center; padding:2px; }
     #emoji-grid button:hover { background:#f3f4f6; }
+    #emoji-grid button img.emoji { width:20px; height:20px; vertical-align:middle; pointer-events:none; }
     @media (max-width: 767px) { .resize-handle { display:none; } }
   </style>
 </head>
@@ -906,8 +908,12 @@ function buildEmojiPicker() {
   const grid = document.getElementById('emoji-grid');
   if (!grid) return;
   grid.innerHTML = EMOJIS.map(em =>
-    `<button onclick="insertEmoji('${em}')" title="${em}">${em}</button>`
+    `<button onclick="insertEmoji('${em}')" title="${em}" data-emoji="${em}">${em}</button>`
   ).join('');
+  // Заменяем нативные глифы на Twemoji-картинки (красивые, консистентные)
+  if (typeof twemoji !== 'undefined') {
+    twemoji.parse(grid, { className: 'emoji', ext: '.svg', folder: 'svg' });
+  }
 }
 
 function toggleEmojiPicker(e) {

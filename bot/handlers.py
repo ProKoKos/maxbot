@@ -75,6 +75,7 @@ from db.models import (
     PostLink,
     UserBotContext,
     UserChannelMembership,
+    UserProfile,
     VerificationRequest,
     VerificationStatus,
     WelcomeConfig,
@@ -633,6 +634,11 @@ async def _handle_dm_message(
     text = (message_body.get("text") or "").strip()
     attachments = _extract_dm_attachments(message_body)
 
+    # Обновляем профиль пользователя при каждом входящем сообщении —
+    # так данные всегда актуальны (имя, фамилия, @username, биография).
+    if max_user_id and bot_id is not None:
+        await _upsert_user_profile(session, bot_id, max_user_id, sender)
+
     # Пропускаем только если нет ни текста, ни вложений (пустой апдейт)
     if not max_user_id or (not text and not attachments) or bot_id is None:
         return
@@ -962,6 +968,78 @@ async def _delete_if_unverified(
 
 
 # ── Вспомогательные функции ──────────────────────────────────────────────────
+
+async def _upsert_user_profile(
+    session: AsyncSession,
+    bot_id: int,
+    max_user_id: str,
+    sender: dict,
+) -> None:
+    """Создаёт или обновляет профиль пользователя по данным из sender-объекта DM.
+
+    Вызывается при каждом входящем DM — данные всегда актуальны.
+    MAX Bot API возвращает в ``sender``:
+      first_name, last_name, username, description, avatar_url, full_avatar_url.
+
+    Не делает commit — вызывается до основного session.commit() хендлера.
+    """
+    # Извлекаем все доступные поля. MAX API иногда объединяет имя в «name»,
+    # поэтому используем first_name как приоритет, fallback на «name».
+    first_name: str | None = (
+        sender.get("first_name")
+        or sender.get("name")
+        or None
+    )
+    last_name: str | None = sender.get("last_name") or None
+    username: str | None = sender.get("username") or None
+    description: str | None = sender.get("description") or None
+
+    # Аватар: MAX отдаёт несколько вариантов поля
+    _photo = sender.get("photo")
+    avatar_url: str | None = (
+        sender.get("avatar_url")
+        or sender.get("photo_url")
+        or (_photo.get("url") if isinstance(_photo, dict) else _photo)
+        or None
+    )
+    full_avatar_url: str | None = sender.get("full_avatar_url") or None
+
+    existing = await session.execute(
+        select(UserProfile).where(
+            UserProfile.bot_id == bot_id,
+            UserProfile.max_user_id == max_user_id,
+        )
+    )
+    profile = existing.scalar_one_or_none()
+
+    if profile:
+        # Обновляем только поля, которые пришли непустыми, —
+        # чтобы не затирать старые данные «пустышками» при неполных апдейтах.
+        if first_name is not None:
+            profile.first_name = first_name
+        if last_name is not None:
+            profile.last_name = last_name
+        if username is not None:
+            profile.username = username
+        if description is not None:
+            profile.description = description
+        if avatar_url is not None:
+            profile.avatar_url = avatar_url
+        if full_avatar_url is not None:
+            profile.full_avatar_url = full_avatar_url
+        profile.last_synced_at = datetime.now(timezone.utc)
+    else:
+        session.add(UserProfile(
+            bot_id=bot_id,
+            max_user_id=max_user_id,
+            first_name=first_name,
+            last_name=last_name,
+            username=username,
+            description=description,
+            avatar_url=avatar_url,
+            full_avatar_url=full_avatar_url,
+        ))
+
 
 async def _send_dm_safe(
     client: MaxClient,

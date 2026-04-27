@@ -28,6 +28,7 @@ from db.models import (
     InboxReadStatus,
     UserBotContext,
     UserChannelMembership,
+    UserProfile,
     VerificationRequest,
 )
 from web.deps import CurrentUser, DBSession, RateLimit
@@ -409,21 +410,34 @@ async def inbox_profile(
     first_msg = msgs[0]
     last_msg_obj = msgs[-1]
 
-    # Аватар — берём из самого свежего сообщения с непустым user_avatar
-    avatar = None
-    for m in reversed(msgs):
-        if m.user_avatar:
-            avatar = m.user_avatar
-            break
-
-    # Имя — из VerificationRequest (самый свежий)
-    name_result = await session.execute(
-        select(VerificationRequest.user_name)
-        .where(VerificationRequest.max_user_id == user_id)
-        .order_by(VerificationRequest.created_at.desc())
-        .limit(1)
+    # Профиль пользователя: UserProfile (актуальный) → fallback на старые источники
+    profile_result = await session.execute(
+        select(UserProfile).where(
+            UserProfile.bot_id == bot_id,
+            UserProfile.max_user_id == user_id,
+        )
     )
-    name = name_result.scalar() or f"User {user_id}"
+    up: UserProfile | None = profile_result.scalar_one_or_none()
+
+    # Аватар: UserProfile → ConversationMessage (legacy)
+    avatar = (up.full_avatar_url or up.avatar_url) if up else None
+    if not avatar:
+        for m in reversed(msgs):
+            if m.user_avatar:
+                avatar = m.user_avatar
+                break
+
+    # Имя: UserProfile.display_name → VerificationRequest (legacy)
+    if up:
+        name = up.display_name
+    else:
+        name_result = await session.execute(
+            select(VerificationRequest.user_name)
+            .where(VerificationRequest.max_user_id == user_id)
+            .order_by(VerificationRequest.created_at.desc())
+            .limit(1)
+        )
+        name = name_result.scalar() or f"User {user_id}"
 
     # Статистика сообщений
     user_msg_count = sum(1 for m in msgs if m.role == "user")
@@ -497,6 +511,10 @@ async def inbox_profile(
     return {
         "user_id": user_id,
         "name": name,
+        "first_name": up.first_name if up else None,
+        "last_name": up.last_name if up else None,
+        "username": up.username if up else None,
+        "description": up.description if up else None,
         "avatar": avatar,
         "first_contact": first_msg.created_at.isoformat(),
         "last_active": last_msg_obj.created_at.isoformat(),

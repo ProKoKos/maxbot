@@ -590,6 +590,53 @@ class ConversationMessage(Base):
     )
 
 
+class UserProfile(Base):
+    """Профильные данные MAX-пользователя, кешированные от бота.
+
+    Создаётся/обновляется при каждом входящем DM (``_handle_dm_message``),
+    поэтому данные всегда отражают последнее состояние профиля в MAX.
+
+    Хранит все поля, которые MAX Bot API возвращает в объекте ``sender``:
+    ``first_name``, ``last_name``, ``username``, ``description`` (биография),
+    ``avatar_url``, ``full_avatar_url``. Комбинированное ``name`` = объединение
+    first_name + last_name вычисляется на лету (property).
+
+    UNIQUE(bot_id, max_user_id) — один профиль на пару бот/пользователь.
+    """
+    __tablename__ = "user_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # @username без символа @
+    username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Биография / «О себе»
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    full_avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Время последнего обновления из MAX API
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "max_user_id", name="uq_user_profile"),
+        Index("ix_user_profile_lookup", "bot_id", "max_user_id"),
+    )
+
+    @property
+    def display_name(self) -> str:
+        """Полное имя: «Имя Фамилия» или fallback на username / max_user_id."""
+        parts = [p for p in (self.first_name, self.last_name) if p]
+        if parts:
+            return " ".join(parts)
+        return self.username or self.max_user_id
+
+
 class UserChannelMembership(Base):
     """Членство MAX-пользователя в канале бота.
 

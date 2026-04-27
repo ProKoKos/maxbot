@@ -1588,15 +1588,19 @@ async def inbox_send(
             resp_att = resp_atts[i] if i < len(resp_atts) else {}
             payload = resp_att.get("payload", {}) if isinstance(resp_att, dict) else {}
             preview: str | None = None
+            # Вариант 0: payload.url — прямая ссылка (формат ответа MAX на POST /messages)
+            if isinstance(payload.get("url"), str) and payload["url"]:
+                preview = payload["url"]
             # Вариант 1: payload.photo / payload.thumbnail
-            for key in ("photo", "thumbnail"):
-                thumb = payload.get(key)
-                if isinstance(thumb, dict) and thumb.get("url"):
-                    preview = thumb["url"]
-                    break
-                elif isinstance(thumb, str) and thumb:
-                    preview = thumb
-                    break
+            if not preview:
+                for key in ("photo", "thumbnail"):
+                    thumb = payload.get(key)
+                    if isinstance(thumb, dict) and thumb.get("url"):
+                        preview = thumb["url"]
+                        break
+                    elif isinstance(thumb, str) and thumb:
+                        preview = thumb
+                        break
             # Вариант 2: payload.photos dict {"<size>": {"url": ...}}
             if not preview:
                 photos_dict = payload.get("photos")

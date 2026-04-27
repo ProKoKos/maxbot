@@ -488,28 +488,43 @@ function renderAttachments(atts, isBot) {
   if (!atts || !atts.length) return '';
   return atts.map(att => {
     const t = att.type || '';
+    const fileUrl = att.url || att.preview_url || '';
+    const tc = isBot ? 'rgba(255,255,255,.8)' : '#6b7280';
     if (t === 'image') {
-      if (att.preview_url) {
-        return `<div class="att-image"><img src="${escHtml(att.preview_url)}" alt="Фото" loading="lazy" onerror="this.parentNode.innerHTML='<div style=padding:8px;font-size:12px;>📷 Фото</div>'"></div>`;
+      const src = att.preview_url || fileUrl;
+      if (src) {
+        const img = `<img src="${escHtml(src)}" alt="Фото" loading="lazy" onerror="this.parentNode.innerHTML='<div style=padding:8px;font-size:12px;>📷 Фото</div>'">`;
+        return fileUrl
+          ? `<div class="att-image"><a href="${escHtml(fileUrl)}" target="_blank" rel="noopener">${img}</a></div>`
+          : `<div class="att-image">${img}</div>`;
       }
-      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">📷 Фото</div>`;
+      return fileUrl
+        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="color:${tc}">📷 Фото</a>`
+        : `<div class="att-file" style="color:${tc}">📷 Фото</div>`;
     }
     if (t === 'video') {
-      if (att.preview_url) {
-        return `<div class="att-video"><img src="${escHtml(att.preview_url)}" alt="Видео" loading="lazy" style="width:100%;"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">▶</div></div>`;
+      if (att.preview_url || fileUrl) {
+        const thumb = `<div class="att-video"><img src="${escHtml(att.preview_url || fileUrl)}" alt="Видео" loading="lazy" style="width:100%;"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">▶</div></div>`;
+        return fileUrl ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="display:block;">${thumb}</a>` : thumb;
       }
-      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">🎥 Видео</div>`;
+      return fileUrl
+        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="color:${tc}">🎥 Видео</a>`
+        : `<div class="att-file" style="color:${tc}">🎥 Видео</div>`;
     }
     if (t === 'audio') {
-      return `<div class="att-audio" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}"><span>🎤</span><span>Голосовое сообщение</span></div>`;
+      const inner = `<div class="att-audio" style="color:${tc}"><span>🎤</span><span>Голосовое сообщение</span></div>`;
+      return fileUrl ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">${inner}</a>` : inner;
     }
     if (t === 'file') {
       const fname = att.filename ? escHtml(att.filename) : 'Файл';
       const fsize = att.size ? ` (${formatSize(att.size)})` : '';
-      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}"><span>📎</span><span>${fname}${fsize}</span></div>`;
+      const inner = `<div class="att-file" style="color:${tc}"><span>📎</span><span>${fname}${fsize}</span></div>`;
+      return fileUrl
+        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" download style="text-decoration:none;">${inner}</a>`
+        : inner;
     }
     if (t === 'share' && att.url) {
-      return `<div class="att-file" style="color:${isBot?'rgba(255,255,255,.8)':'#6b7280'}">🔗 <a href="${escHtml(att.url)}" target="_blank" rel="noopener" style="text-decoration:underline;">${escHtml(att.url.slice(0,50))}${att.url.length>50?'…':''}</a></div>`;
+      return `<div class="att-file" style="color:${tc}">🔗 <a href="${escHtml(att.url)}" target="_blank" rel="noopener" style="text-decoration:underline;">${escHtml(att.url.slice(0,50))}${att.url.length>50?'…':''}</a></div>`;
     }
     return '';
   }).join('');
@@ -629,10 +644,12 @@ function renderProfileTab(tab) {
     }
     content.innerHTML = `<div class="media-grid p-2">
       ${items.map(att => {
-        if (att.preview_url) {
-          return `<div class="media-thumb"><img src="${escHtml(att.preview_url)}" loading="lazy" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div class="type-icon" style="display:none">${att.type==='video'?'🎥':'📷'}</div></div>`;
-        }
-        return `<div class="media-thumb"><div class="type-icon">${att.type==='video'?'🎥':'📷'}</div></div>`;
+        const fileUrl = att.url || att.preview_url || '';
+        const icon = att.type === 'video' ? '🎥' : '📷';
+        const inner = att.preview_url
+          ? `<div class="media-thumb"><img src="${escHtml(att.preview_url)}" loading="lazy" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div class="type-icon" style="display:none">${icon}</div></div>`
+          : `<div class="media-thumb"><div class="type-icon">${icon}</div></div>`;
+        return fileUrl ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="display:contents;">${inner}</a>` : inner;
       }).join('')}
     </div>`;
     return;
@@ -649,13 +666,17 @@ function renderProfileTab(tab) {
         const dt = new Date(att.date);
         const fname = att.filename || 'Файл';
         const fsize = att.size ? formatSize(att.size) : '';
-        return `<div class="flex items-center gap-3 px-4 py-2.5">
+        const fileUrl = att.url || '';
+        const inner = `<div class="flex items-center gap-3 px-4 py-2.5${fileUrl ? ' hover:bg-gray-50' : ''}">
           <span class="text-xl flex-shrink-0">📎</span>
           <div class="min-w-0 flex-1">
             <div class="text-sm text-gray-800 truncate">${escHtml(fname)}</div>
             <div class="text-xs text-gray-400">${fsize ? fsize + ' · ' : ''}${dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})}</div>
           </div>
         </div>`;
+        return fileUrl
+          ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" download="${escHtml(fname)}" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
+          : inner;
       }).join('')}
     </div>`;
     return;
@@ -670,13 +691,17 @@ function renderProfileTab(tab) {
     content.innerHTML = `<div class="divide-y divide-gray-50">
       ${items.map(att => {
         const dt = new Date(att.date);
-        return `<div class="flex items-center gap-3 px-4 py-2.5">
+        const fileUrl = att.url || '';
+        const inner = `<div class="flex items-center gap-3 px-4 py-2.5${fileUrl ? ' hover:bg-gray-50' : ''}">
           <span class="text-xl flex-shrink-0">🎤</span>
           <div class="min-w-0 flex-1">
             <div class="text-sm text-gray-800">Голосовое сообщение</div>
             <div class="text-xs text-gray-400">${dt.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})} · ${dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</div>
           </div>
         </div>`;
+        return fileUrl
+          ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
+          : inner;
       }).join('')}
     </div>`;
     return;

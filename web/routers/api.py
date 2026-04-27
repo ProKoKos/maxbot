@@ -1582,40 +1582,45 @@ async def inbox_send(
             "inbox_send MAX response atts bot=%s resp_atts=%r", bot_id, resp_atts
         )
         for i, stored_att in enumerate(atts_to_store):
-            if stored_att.get("type") != "image":
-                continue
             # Ищем соответствующее вложение в ответе по индексу (порядок совпадает)
             resp_att = resp_atts[i] if i < len(resp_atts) else {}
             payload = resp_att.get("payload", {}) if isinstance(resp_att, dict) else {}
-            preview: str | None = None
-            # Вариант 0: payload.url — прямая ссылка (формат ответа MAX на POST /messages)
+            att_type = stored_att.get("type", "")
+            new_att = dict(stored_att)
+
+            # Извлекаем прямую ссылку на файл из ответа MAX
+            # Вариант 0: payload.url — основной формат ответа MAX на POST /messages
+            direct_url: str | None = None
             if isinstance(payload.get("url"), str) and payload["url"]:
-                preview = payload["url"]
-            # Вариант 1: payload.photo / payload.thumbnail
-            if not preview:
+                direct_url = payload["url"]
+            # Вариант 1: payload.photo / payload.thumbnail (изображения в некоторых форматах)
+            if not direct_url:
                 for key in ("photo", "thumbnail"):
                     thumb = payload.get(key)
                     if isinstance(thumb, dict) and thumb.get("url"):
-                        preview = thumb["url"]
+                        direct_url = thumb["url"]
                         break
                     elif isinstance(thumb, str) and thumb:
-                        preview = thumb
+                        direct_url = thumb
                         break
             # Вариант 2: payload.photos dict {"<size>": {"url": ...}}
-            if not preview:
+            if not direct_url:
                 photos_dict = payload.get("photos")
                 if isinstance(photos_dict, dict):
                     for pv in photos_dict.values():
                         if isinstance(pv, dict) and pv.get("url"):
-                            preview = pv["url"]
+                            direct_url = pv["url"]
                             break
-            if preview:
-                atts_to_store[i] = {**stored_att, "preview_url": preview}
-            elif stored_att.get("preview_url", "").startswith("blob:"):
-                # Blob URL не переживёт перезагрузку — убираем, чтобы не хранить мусор
-                new = dict(stored_att)
-                del new["preview_url"]
-                atts_to_store[i] = new
+
+            if direct_url:
+                new_att["url"] = direct_url
+                # Для изображений preview_url = та же ссылка (используется как src для <img>)
+                if att_type == "image":
+                    new_att["preview_url"] = direct_url
+            # Blob URL не переживёт перезагрузку — убираем, чтобы не хранить мусор
+            if new_att.get("preview_url", "").startswith("blob:"):
+                del new_att["preview_url"]
+            atts_to_store[i] = new_att
 
     msg = ConversationMessage(
         bot_id=bot_id,

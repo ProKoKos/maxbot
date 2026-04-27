@@ -637,6 +637,12 @@ async def _handle_dm_message(
     # Обновляем профиль пользователя при каждом входящем сообщении —
     # так данные всегда актуальны (имя, фамилия, @username, биография, аватар).
     logger.info("DM sender raw: %s", json.dumps(sender, ensure_ascii=False))
+    logger.info("DM chat raw: %s", json.dumps(chat, ensure_ascii=False))
+    try:
+        _chat_info = await client.get_chat(chat_id)
+        logger.info("GET /chats/%s: %s", chat_id, json.dumps(_chat_info, ensure_ascii=False))
+    except Exception as _e:
+        logger.info("GET /chats/%s failed: %s", chat_id, _e)
     if max_user_id and bot_id is not None:
         await _upsert_user_profile(session, bot_id, max_user_id, sender, client)
 

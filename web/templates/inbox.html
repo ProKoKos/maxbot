@@ -520,7 +520,7 @@ function renderAttachments(atts, isBot) {
       const fsize = att.size ? ` (${formatSize(att.size)})` : '';
       const inner = `<div class="att-file" style="color:${tc}"><span>📎</span><span>${fname}${fsize}</span></div>`;
       return fileUrl
-        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" download style="text-decoration:none;">${inner}</a>`
+        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">${inner}</a>`
         : inner;
     }
     if (t === 'share' && att.url) {
@@ -675,7 +675,7 @@ function renderProfileTab(tab) {
           </div>
         </div>`;
         return fileUrl
-          ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" download="${escHtml(fname)}" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
+          ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
           : inner;
       }).join('')}
     </div>`;

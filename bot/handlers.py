@@ -51,7 +51,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -74,6 +74,7 @@ from db.models import (
     LogLevel,
     PostLink,
     UserBotContext,
+    UserChannelMembership,
     VerificationRequest,
     VerificationStatus,
     WelcomeConfig,
@@ -109,6 +110,8 @@ async def handle_update(
     elif update_type in ("user_added", "chat_member_added"):
         # MAX API использует обе вариации в зависимости от способа вступления.
         await _handle_member_added(update, session, client, bot_id=bot_id)
+    elif update_type in ("user_removed", "chat_member_removed"):
+        await _handle_member_removed(update, session, client, bot_id=bot_id)
     else:
         logger.debug("Unhandled update type: %r", update_type)
 
@@ -271,6 +274,13 @@ async def _handle_member_added(
 
     if not chat_id or not max_user_id:
         logger.debug("user_added: missing chat_id or user_id")
+        return
+
+    # Флаг is_channel: одно событие user_added используется для групп и каналов.
+    # Если пользователь подписался на канал — записываем членство и выходим:
+    # верификация для каналов не нужна.
+    if update.get("is_channel"):
+        await _save_channel_membership(session, bot_id, max_user_id, chat_id)
         return
 
     # 1. Пробуем найти standalone WelcomeConfig — он имеет приоритет над
@@ -784,6 +794,111 @@ async def _save_user_bot_context(
         group_id=config.group_id,
         assistant_config_id=assistant_config.id,
     ))
+
+
+# ── Членство в каналах ───────────────────────────────────────────────────────
+
+async def _save_channel_membership(
+    session: AsyncSession,
+    bot_id: int | None,
+    max_user_id: str,
+    channel_id: str,
+) -> None:
+    """Сохраняет факт подписки пользователя на канал.
+
+    Название канала берём из ChannelGroupPair — если для этого канала
+    настроена пара, имя уже закешировано. Иначе оставляем NULL
+    (UI покажет channel_id как fallback).
+
+    Upsert по UNIQUE(bot_id, max_user_id, channel_id): повторный вход
+    или дублированный apdate просто обновляет joined_at.
+    """
+    if bot_id is None or not max_user_id or not channel_id:
+        return
+
+    # Пробуем найти название канала в уже известных парах.
+    pair_result = await session.execute(
+        select(ChannelGroupPair.channel_name).where(
+            ChannelGroupPair.bot_id == bot_id,
+            ChannelGroupPair.channel_id == channel_id,
+        ).limit(1)
+    )
+    channel_title: str | None = pair_result.scalar_one_or_none() or None
+
+    existing = await session.execute(
+        select(UserChannelMembership).where(
+            UserChannelMembership.bot_id == bot_id,
+            UserChannelMembership.max_user_id == max_user_id,
+            UserChannelMembership.channel_id == channel_id,
+        )
+    )
+    membership = existing.scalar_one_or_none()
+    if membership:
+        # Обновляем время и, если появилось название, сохраняем его.
+        membership.joined_at = datetime.now(timezone.utc)
+        if channel_title and not membership.channel_title:
+            membership.channel_title = channel_title
+    else:
+        session.add(UserChannelMembership(
+            bot_id=bot_id,
+            max_user_id=max_user_id,
+            channel_id=channel_id,
+            channel_title=channel_title,
+        ))
+    await session.commit()
+    logger.info(
+        "Channel membership saved: user=%s channel=%s (%s) bot=%s",
+        max_user_id, channel_id, channel_title or "?", bot_id,
+    )
+
+
+async def _handle_member_removed(
+    update: dict,
+    session: AsyncSession,
+    client: MaxClient,
+    bot_id: int | None = None,
+) -> None:
+    """Обрабатывает выход участника из чата (``user_removed`` / ``chat_member_removed``).
+
+    Если пользователь вышел из канала (``is_channel=True``) — удаляем
+    запись из ``user_channel_memberships``.
+    Выход из группы пока не обрабатывается (UserBotContext не трогаем —
+    история переписки и привязка к ассистенту должны остаться).
+    """
+    is_channel = bool(update.get("is_channel"))
+    if not is_channel:
+        logger.debug("user_removed from group — skipping (no action needed)")
+        return
+
+    chat_id = str(
+        update.get("chat_id")
+        or update.get("chat", {}).get("chat_id", "")
+    )
+    user_info = update.get("user", {})
+    max_user_id = str(user_info.get("user_id", ""))
+
+    if not chat_id or not max_user_id or bot_id is None:
+        logger.debug("user_removed: missing chat_id, user_id or bot_id")
+        return
+
+    result = await session.execute(
+        delete(UserChannelMembership).where(
+            UserChannelMembership.bot_id == bot_id,
+            UserChannelMembership.max_user_id == max_user_id,
+            UserChannelMembership.channel_id == chat_id,
+        )
+    )
+    await session.commit()
+    if result.rowcount:
+        logger.info(
+            "Channel membership removed: user=%s channel=%s bot=%s",
+            max_user_id, chat_id, bot_id,
+        )
+    else:
+        logger.debug(
+            "user_removed from channel: no membership record found (user=%s channel=%s bot=%s)",
+            max_user_id, chat_id, bot_id,
+        )
 
 
 # ── Удаление сообщений у непроверенных участников ────────────────────────────

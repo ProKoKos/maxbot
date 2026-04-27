@@ -590,6 +590,42 @@ class ConversationMessage(Base):
     )
 
 
+class UserChannelMembership(Base):
+    """Членство MAX-пользователя в канале бота.
+
+    Создаётся при получении события ``user_added`` с ``is_channel=True``,
+    удаляется при ``user_removed`` с ``is_channel=True``.
+    Используется для маршрутизации FAQ/KB: бот знает, каким каналам
+    релевантен конкретный пользователь при обращении в DM.
+
+    UNIQUE(bot_id, max_user_id, channel_id) — чтобы повторный вход
+    (или дублированный apdate) не плодил дубли; при upsert'е просто
+    обновляем joined_at.
+    """
+    __tablename__ = "user_channel_memberships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), nullable=False
+    )
+    max_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Название канала — берётся из ChannelGroupPair при наличии пары,
+    # иначе остаётся None (будет отображаться как channel_id в UI).
+    channel_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("bot_id", "max_user_id", "channel_id", name="uq_user_channel_membership"),
+        # Основной лукап: профиль пользователя → его каналы.
+        Index("ix_user_channel_membership_lookup", "bot_id", "max_user_id"),
+        # Будущий лукап: какие пользователи подписаны на конкретный канал.
+        Index("ix_user_channel_membership_channel", "bot_id", "channel_id"),
+    )
+
+
 class InboxReadStatus(Base):
     """Время последнего открытия переписки в инбоксе.
 

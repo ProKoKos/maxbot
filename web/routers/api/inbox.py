@@ -27,6 +27,7 @@ from db.models import (
     ConversationMessage,
     InboxReadStatus,
     UserBotContext,
+    UserChannelMembership,
     VerificationRequest,
 )
 from web.deps import CurrentUser, DBSession, RateLimit
@@ -445,6 +446,23 @@ async def inbox_profile(
             "group_name": cfg.group_name if cfg else ctx.group_id,
         })
 
+    # Каналы пользователя (через UserChannelMembership)
+    channels_result = await session.execute(
+        select(UserChannelMembership)
+        .where(
+            UserChannelMembership.bot_id == bot_id,
+            UserChannelMembership.max_user_id == user_id,
+        )
+        .order_by(UserChannelMembership.joined_at.asc())
+    )
+    channels = [
+        {
+            "channel_id": m.channel_id,
+            "channel_title": m.channel_title or m.channel_id,
+        }
+        for m in channels_result.scalars().all()
+    ]
+
     # Ссылки — regex-поиск по тексту сообщений
     _url_re = re.compile(r"https?://[^\s<>\"'{}|\\^`\[\]]+")
     links: list[dict] = []
@@ -485,6 +503,7 @@ async def inbox_profile(
         "user_msg_count": user_msg_count,
         "bot_msg_count": bot_msg_count,
         "groups": groups,
+        "channels": channels,
         "links": links[-100:],
         "media": media[-100:],
         "files": files[-100:],

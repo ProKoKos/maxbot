@@ -1558,7 +1558,7 @@ async def inbox_send(
 
     async with MaxClient(token=token) as client:
         try:
-            await client.send_message(
+            max_resp = await client.send_message(
                 chat_id=chat_id,
                 text=body.text or "",
                 attachments=max_atts,
@@ -1567,6 +1567,50 @@ async def inbox_send(
         except MaxAPIError as e:
             raise HTTPException(502, f"Max API error: {e}")
 
+    # Пытаемся извлечь реальные URL изображений из ответа MAX API.
+    # MAX возвращает Message-объект; вложения могут быть в разных форматах:
+    #   payload.photo/thumbnail → {"url": "..."}
+    #   payload.photos          → {"<size>": {"url": "..."}, ...}
+    atts_to_store: list[dict] = list(body.attachments or [])
+    if atts_to_store and isinstance(max_resp, dict):
+        resp_body = (
+            max_resp.get("message", {}).get("body", {})
+            or max_resp.get("body", {})
+        )
+        resp_atts = resp_body.get("attachments", []) if isinstance(resp_body, dict) else []
+        _ul.info("inbox_send MAX response atts bot=%s resp_atts=%r", bot_id, resp_atts)
+        for i, stored_att in enumerate(atts_to_store):
+            if stored_att.get("type") != "image":
+                continue
+            # Ищем соответствующее вложение в ответе по индексу (порядок совпадает)
+            resp_att = resp_atts[i] if i < len(resp_atts) else {}
+            payload = resp_att.get("payload", {}) if isinstance(resp_att, dict) else {}
+            preview: str | None = None
+            # Вариант 1: payload.photo / payload.thumbnail
+            for key in ("photo", "thumbnail"):
+                thumb = payload.get(key)
+                if isinstance(thumb, dict) and thumb.get("url"):
+                    preview = thumb["url"]
+                    break
+                elif isinstance(thumb, str) and thumb:
+                    preview = thumb
+                    break
+            # Вариант 2: payload.photos dict {"<size>": {"url": ...}}
+            if not preview:
+                photos_dict = payload.get("photos")
+                if isinstance(photos_dict, dict):
+                    for pv in photos_dict.values():
+                        if isinstance(pv, dict) and pv.get("url"):
+                            preview = pv["url"]
+                            break
+            if preview:
+                atts_to_store[i] = {**stored_att, "preview_url": preview}
+            elif stored_att.get("preview_url", "").startswith("blob:"):
+                # Blob URL не переживёт перезагрузку — убираем, чтобы не хранить мусор
+                new = dict(stored_att)
+                del new["preview_url"]
+                atts_to_store[i] = new
+
     msg = ConversationMessage(
         bot_id=bot_id,
         max_user_id=body.user_id,
@@ -1574,7 +1618,7 @@ async def inbox_send(
         assistant_config_id=body.assistant_config_id,
         role="assistant",
         content=body.text or "",
-        attachments_json=json.dumps(body.attachments or [], ensure_ascii=False),
+        attachments_json=json.dumps(atts_to_store, ensure_ascii=False),
     )
     session.add(msg)
     await session.commit()

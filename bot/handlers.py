@@ -937,7 +937,9 @@ def _extract_dm_attachments(body: dict) -> list[dict]:
             item["filename"] = payload["filename"]
         if payload.get("size"):
             item["size"] = payload["size"]
-        # Превью для image/video — MAX хранит их по-разному
+        # Превью для image/video — MAX хранит URL по-разному в зависимости от версии:
+        #   payload.photo / payload.thumbnail → {"url": "https://..."} или строка
+        #   payload.photos                    → {"<size>": {"url": "..."}, ...}
         for thumb_key in ("photo", "thumbnail"):
             thumb = payload.get(thumb_key)
             if isinstance(thumb, dict) and thumb.get("url"):
@@ -946,6 +948,14 @@ def _extract_dm_attachments(body: dict) -> list[dict]:
             elif isinstance(thumb, str) and thumb:
                 item["preview_url"] = thumb
                 break
+        # Fallback: photos dict {"320": {"url": ...}, "640": {"url": ...}, ...}
+        if "preview_url" not in item:
+            photos_dict = payload.get("photos")
+            if isinstance(photos_dict, dict):
+                for photo_variant in photos_dict.values():
+                    if isinstance(photo_variant, dict) and photo_variant.get("url"):
+                        item["preview_url"] = photo_variant["url"]
+                        break
         result.append(item)
     return result
 

@@ -721,6 +721,10 @@ async function sendMessage() {
   const attachments = readyAtts.map(a => {
     const o = { type: a.type, token: a.token, size: a.size };
     if (a.filename) o.filename = a.filename;
+    // Передаём blob URL на сервер — он используется для немедленного отображения
+    // в текущей сессии; бэкенд заменит его на реальный URL из ответа MAX (если получит),
+    // либо удалит, чтобы не хранить невалидную ссылку.
+    if (a.previewUrl) o.preview_url = a.previewUrl;
     return o;
   });
 

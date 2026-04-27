@@ -1636,7 +1636,16 @@ async def inbox_upload(
             )
             raise HTTPException(502, f"MAX API upload error (status {e.status}): {e.body}")
 
-    upload_token = result.get("token") or result.get("file_id") or ""
+    # MAX возвращает разные структуры в зависимости от типа:
+    #   файлы/аудио/видео → {"token": "..."}
+    #   картинки          → {"photos": ["<token>", ...]}
+    photos_list = result.get("photos") or []
+    upload_token = (
+        result.get("token")
+        or result.get("file_id")
+        or (photos_list[0] if photos_list else "")
+        or ""
+    )
     if not upload_token:
         raise HTTPException(502, f"MAX API не вернул token: {result}")
 

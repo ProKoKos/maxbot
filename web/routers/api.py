@@ -1638,20 +1638,25 @@ async def inbox_upload(
 
     # MAX возвращает разные структуры в зависимости от типа:
     #   файлы/аудио/видео → {"token": "..."}
-    #   картинки          → {"photos": {...}} или {"photos": ["<token>", ...]}
+    #   картинки          → {"photos": {"<photo_id>": {"token": "..."}, ...}}
+    #                    или {"photos": ["<token>", ...]}  (старый формат)
     _ul.info("MAX upload raw result bot=%s att_type=%s result=%r", bot_id, att_type, result)
     photos_val = result.get("photos")
     photos_token = ""
     if isinstance(photos_val, dict):
-        # {"photos": {"token": "...", ...}} или {"photos": {"<token_str>": ...}}
-        photos_token = (
-            photos_val.get("token")
-            or photos_val.get("file_id")
-            or next(iter(photos_val.values()), "")
-        )
+        # {"<photo_id>": {"token": "..."}} — берём первый элемент, затем его token
+        first_photo = next(iter(photos_val.values()), None)
+        if isinstance(first_photo, dict):
+            photos_token = first_photo.get("token") or first_photo.get("file_id") or ""
+        elif isinstance(first_photo, str):
+            photos_token = first_photo
     elif isinstance(photos_val, list) and photos_val:
-        # {"photos": ["<token>", ...]}
-        photos_token = photos_val[0] if isinstance(photos_val[0], str) else ""
+        # ["<token>", ...] — строка или dict с token
+        item = photos_val[0]
+        if isinstance(item, str):
+            photos_token = item
+        elif isinstance(item, dict):
+            photos_token = item.get("token") or item.get("file_id") or ""
     upload_token = (
         result.get("token")
         or result.get("file_id")

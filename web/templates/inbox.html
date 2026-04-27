@@ -516,11 +516,12 @@ function renderAttachments(atts, isBot) {
       return fileUrl ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">${inner}</a>` : inner;
     }
     if (t === 'file') {
-      const fname = att.filename ? escHtml(att.filename) : 'Файл';
+      const rawFname = att.filename || null;
+      const fname = rawFname ? escHtml(rawFname) : 'Файл';
       const fsize = att.size ? ` (${formatSize(att.size)})` : '';
       const inner = `<div class="att-file" style="color:${tc}"><span>📎</span><span>${fname}${fsize}</span></div>`;
       return fileUrl
-        ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">${inner}</a>`
+        ? `<a href="${escHtml(proxyFileUrl(fileUrl, rawFname))}" target="_blank" rel="noopener" style="text-decoration:none;">${inner}</a>`
         : inner;
     }
     if (t === 'share' && att.url) {
@@ -534,6 +535,15 @@ function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' Б';
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' КБ';
   return (bytes / 1048576).toFixed(1) + ' МБ';
+}
+
+// Проксирует файл через наш сервер, добавляя правильный Content-Disposition.
+// Нужен потому, что MAX CDN не шлёт имя файла, а download-атрибут работает
+// только для same-origin URL.
+function proxyFileUrl(attUrl, filename) {
+  const p = new URLSearchParams({ url: attUrl });
+  if (filename) p.set('filename', filename);
+  return `/api/bots/${BOT_ID}/inbox/proxy?${p.toString()}`;
 }
 
 // ── Профиль пользователя ───────────────────────────────────────────────────
@@ -675,7 +685,7 @@ function renderProfileTab(tab) {
           </div>
         </div>`;
         return fileUrl
-          ? `<a href="${escHtml(fileUrl)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
+          ? `<a href="${escHtml(proxyFileUrl(fileUrl, att.filename || null))}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;">${inner}</a>`
           : inner;
       }).join('')}
     </div>`;

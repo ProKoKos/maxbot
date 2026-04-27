@@ -12,8 +12,9 @@ settings, Webhook, Inbox. Каждый ресурс соблюдает изол�
 import json
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func as sqlfunc, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -1733,3 +1734,51 @@ async def inbox_upload(
         "filename": filename,
         "size": len(file_bytes),
     }
+
+
+@router.get("/bots/{bot_id}/inbox/proxy")
+async def inbox_proxy_download(
+    bot_id: int,
+    url: str,
+    filename: str | None = None,
+    current_user: CurrentUser,
+    session: DBSession,
+):
+    """Прокси-скачивание файла с MAX CDN с правильным Content-Disposition.
+
+    CDN MAX не возвращает имя файла в заголовках, а атрибут ``download``
+    в HTML работает только для same-origin URL. Этот эндпоинт скачивает
+    файл с CDN и отдаёт клиенту с нужным ``Content-Disposition``.
+
+    SSRF-защита: разрешены только домены ``*.oneme.ru`` и ``*.max.ru``.
+    """
+    from urllib.parse import urlparse, quote as _quote
+
+    _host = urlparse(url).hostname or ""
+    if not (_host.endswith(".oneme.ru") or _host.endswith(".max.ru")):
+        raise HTTPException(400, "URL не разрешён")
+
+    await _require_bot_owner(bot_id, current_user.id, session)
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as _c:
+            async with _c.stream("GET", url) as _resp:
+                async for chunk in _resp.aiter_bytes(65536):
+                    yield chunk
+
+    resp_headers: dict[str, str] = {}
+    if filename:
+        # RFC 5987: поддержка UTF-8 имён файлов во всех браузерах
+        safe_ascii = filename.encode("ascii", errors="replace").decode()
+        encoded = _quote(filename, safe="")
+        resp_headers["Content-Disposition"] = (
+            f'attachment; filename="{safe_ascii}"; filename*=UTF-8\'\'{encoded}'
+        )
+    else:
+        resp_headers["Content-Disposition"] = "attachment"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/octet-stream",
+        headers=resp_headers,
+    )

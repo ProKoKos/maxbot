@@ -140,7 +140,6 @@ async def get_chunks_preview(
         select(KnowledgeChunk)
         .where(KnowledgeChunk.document_id == doc.id)
         .order_by(KnowledgeChunk.chunk_index)
-        .limit(5)
     )
     chunks = result.scalars().all()
     return [{"index": c.chunk_index, "content": c.content} for c in chunks]

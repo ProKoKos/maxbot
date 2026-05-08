@@ -235,6 +235,13 @@
               </svg>
             </button>
           </div>
+          <div class="flex items-center gap-2 mt-2">
+            <button type="button" id="chat-test-btn" onclick="testChatConnection()"
+                    class="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
+              Проверить соединение
+            </button>
+            <span id="chat-test-status" class="text-xs text-gray-400"></span>
+          </div>
         </div>
 
         <!-- System prompt -->
@@ -291,6 +298,13 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
                 </svg>
               </button>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+              <button type="button" id="emb-test-btn" onclick="testEmbeddingConnection()"
+                      class="text-xs px-2.5 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
+                Проверить соединение
+              </button>
+              <span id="emb-test-status" class="text-xs text-gray-400"></span>
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
@@ -459,6 +473,70 @@ async function saveSettings(e) {
   } catch (err) {
     statusEl.textContent = '❌ ' + err.message;
     statusEl.className = 'text-sm ml-auto text-red-600';
+  }
+}
+
+// ── Connection tests ─────────────────────────────────────────────────────────
+
+async function testChatConnection() {
+  const statusEl = document.getElementById('chat-test-status');
+  const btn = document.getElementById('chat-test-btn');
+  const model = document.getElementById('field-model').value.trim();
+  const apiUrl = document.getElementById('field-api-url').value.trim();
+  const apiKey = document.getElementById('field-api-key').value;
+  if (!model || !apiUrl || !apiKey) {
+    statusEl.textContent = '⚠ Заполните модель, URL и ключ';
+    statusEl.className = 'text-xs text-amber-600';
+    return;
+  }
+  btn.disabled = true;
+  statusEl.textContent = 'Проверяем…';
+  statusEl.className = 'text-xs text-gray-500';
+  try {
+    const resp = await fetch('/api/assistant/test-chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model, api_url: apiUrl, api_key: apiKey}),
+    });
+    const data = await resp.json();
+    statusEl.textContent = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+    statusEl.className = 'text-xs ' + (data.ok ? 'text-green-600' : 'text-red-600');
+  } catch (e) {
+    statusEl.textContent = '❌ Ошибка запроса';
+    statusEl.className = 'text-xs text-red-600';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function testEmbeddingConnection() {
+  const statusEl = document.getElementById('emb-test-status');
+  const btn = document.getElementById('emb-test-btn');
+  const model = document.getElementById('field-emb-model').value.trim();
+  const apiUrl = document.getElementById('field-emb-url').value.trim();
+  const apiKey = document.getElementById('field-emb-key').value;
+  if (!model || !apiUrl || !apiKey) {
+    statusEl.textContent = '⚠ Заполните модель, URL и ключ';
+    statusEl.className = 'text-xs text-amber-600';
+    return;
+  }
+  btn.disabled = true;
+  statusEl.textContent = 'Проверяем…';
+  statusEl.className = 'text-xs text-gray-500';
+  try {
+    const resp = await fetch('/api/assistant/test-embedding', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model, api_url: apiUrl, api_key: apiKey}),
+    });
+    const data = await resp.json();
+    statusEl.textContent = data.ok ? '✅ ' + data.message : '❌ ' + data.message;
+    statusEl.className = 'text-xs ' + (data.ok ? 'text-green-600' : 'text-red-600');
+  } catch (e) {
+    statusEl.textContent = '❌ Ошибка запроса';
+    statusEl.className = 'text-xs text-red-600';
+  } finally {
+    btn.disabled = false;
   }
 }
 

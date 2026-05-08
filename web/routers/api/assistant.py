@@ -1,4 +1,5 @@
 """AI-ассистент конфиги: CRUD-эндпоинты /assistant/configs/*."""
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -148,6 +149,56 @@ async def update_assistant_config(
 
     await session.commit()
     return {"ok": True}
+
+
+class TestConnectionBody(BaseModel):
+    model: str
+    api_url: str
+    api_key: str
+
+
+@router.post("/assistant/test-chat")
+async def test_chat_connection(body: TestConnectionBody, current_user: CurrentUser, _: RateLimit):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{body.api_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {body.api_key}"},
+                json={"model": body.model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+            )
+            resp.raise_for_status()
+        return {"ok": True, "message": "Модель доступна"}
+    except httpx.HTTPStatusError as e:
+        try:
+            detail = e.response.json().get("error", {}).get("message", str(e))
+        except Exception:
+            detail = f"HTTP {e.response.status_code}"
+        return {"ok": False, "message": detail}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.post("/assistant/test-embedding")
+async def test_embedding_connection(body: TestConnectionBody, current_user: CurrentUser, _: RateLimit):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{body.api_url.rstrip('/')}/embeddings",
+                headers={"Authorization": f"Bearer {body.api_key}"},
+                json={"model": body.model, "input": "test"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            dim = len(data["data"][0]["embedding"])
+        return {"ok": True, "message": f"Доступно, размерность {dim}"}
+    except httpx.HTTPStatusError as e:
+        try:
+            detail = e.response.json().get("error", {}).get("message", str(e))
+        except Exception:
+            detail = f"HTTP {e.response.status_code}"
+        return {"ok": False, "message": detail}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
 
 
 @router.delete("/assistant/configs/{config_id}", status_code=204)

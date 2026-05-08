@@ -5,9 +5,15 @@ import tiktoken
 
 
 def extract_text_from_pdf(data: bytes) -> str:
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(data))
-    return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    import fitz  # PyMuPDF
+    doc = fitz.open(stream=data, filetype="pdf")
+    pages = []
+    for page in doc:
+        text = page.get_text()
+        if text.strip():
+            pages.append(text)
+    doc.close()
+    return "\n\n".join(pages)
 
 
 def extract_text_from_docx(data: bytes) -> str:

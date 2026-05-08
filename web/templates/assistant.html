@@ -199,57 +199,72 @@
         </button>
       </div>
 
-      <!-- Model name -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">Модель</label>
-        <input type="text" id="field-model" placeholder="например: google/gemma-3-12b-it:free"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-gray-400 mt-1">ID модели в формате провайдера (например: google/gemma-3-12b-it:free, gpt-4o-mini)</p>
-      </div>
+      <!-- Assistant settings block: скрывается при выключенном ассистенте -->
+      <div id="assistant-fields" class="hidden space-y-5">
 
-      <!-- API URL -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">API URL</label>
-        <input type="text" id="field-api-url" placeholder="https://openrouter.ai/api/v1"
-               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-gray-400 mt-1">Базовый URL OpenAI-совместимого API (OpenRouter, Ollama, LM Studio и др.)</p>
-      </div>
-
-      <!-- API Key -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">API ключ</label>
-        <div class="relative">
-          <input type="password" id="field-api-key"
-                 class="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <button type="button" onclick="toggleApiKeyVisibility()"
-                  class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600">
-            <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-            </svg>
-            <svg id="eye-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-            </svg>
-          </button>
+        <!-- Model name -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Модель</label>
+          <input type="text" id="field-model" placeholder="например: google/gemma-3-12b-it:free"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <p class="text-xs text-gray-400 mt-1">ID модели в формате провайдера (например: google/gemma-3-12b-it:free, gpt-4o-mini)</p>
         </div>
-      </div>
 
-      <!-- System prompt -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1.5">
-          Системный промт
-          <span class="font-normal text-gray-400">(личность ассистента)</span>
-        </label>
-        <textarea id="field-prompt" rows="6"
-                  placeholder="Ты — дружелюбный помощник сообщества. Отвечай кратко и по делу."
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"></textarea>
-        <p class="text-xs text-gray-400 mt-1">Задаёт тон, ограничения и контекст для ассистента</p>
-      </div>
+        <!-- API URL -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">API URL</label>
+          <input type="text" id="field-api-url" placeholder="https://openrouter.ai/api/v1"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <p class="text-xs text-gray-400 mt-1">Базовый URL OpenAI-совместимого API (OpenRouter, Ollama, LM Studio и др.)</p>
+        </div>
 
-      <!-- ── База знаний (RAG) ──────────────────────────────────────────── -->
-      <div class="pt-4 border-t border-gray-100">
-        <div class="text-sm font-semibold text-gray-700 mb-3">🗂 Настройки базы знаний</div>
-        <div class="space-y-3">
+        <!-- API Key -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">API ключ</label>
+          <div class="relative">
+            <input type="password" id="field-api-key"
+                   class="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <button type="button" onclick="toggleApiKeyVisibility()"
+                    class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600">
+              <svg id="eye-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+              <svg id="eye-off-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- System prompt -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">
+            Системный промт
+            <span class="font-normal text-gray-400">(личность ассистента)</span>
+          </label>
+          <textarea id="field-prompt" rows="6"
+                    placeholder="Ты — дружелюбный помощник сообщества. Отвечай кратко и по делу."
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"></textarea>
+          <p class="text-xs text-gray-400 mt-1">Задаёт тон, ограничения и контекст для ассистента</p>
+        </div>
+
+        <!-- ── KB toggle ──────────────────────────────────────────────────── -->
+        <div class="pt-2 border-t border-gray-100">
+          <div class="flex items-center justify-between py-1">
+            <div>
+              <div class="text-sm font-medium text-gray-800">Использовать базу знаний</div>
+              <div class="text-xs text-gray-500 mt-0.5">Поиск по документам при ответе</div>
+            </div>
+            <button type="button" id="kb-toggle-btn" onclick="toggleKb()"
+                    class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+              <span id="kb-toggle-knob" class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ── KB fields: скрываются при выключенной KB ──────────────────── -->
+        <div id="kb-fields" class="hidden space-y-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1.5">Embedding-модель</label>
             <input type="text" id="field-emb-model" placeholder="text-embedding-3-small"
@@ -282,7 +297,8 @@
             <a id="kb-link" href="/kb" class="text-sm text-indigo-600 hover:text-indigo-700 underline">→ Управлять документами базы знаний</a>
           </div>
         </div>
-      </div>
+
+      </div><!-- /assistant-fields -->
 
       <div class="flex items-center gap-3 pt-3 border-t border-gray-100">
         <button type="submit"
@@ -302,6 +318,7 @@
 <script>
 const CONFIGS = {{ configs_data | tojson }};
 let currentEnabled = false;
+let currentKbEnabled = false;
 
 function openSettings(idx) {
   const cfg = CONFIGS[idx];
@@ -309,6 +326,7 @@ function openSettings(idx) {
   document.getElementById('modal-title').textContent = 'Ассистент: ' + (cfg.group_name || cfg.group_id);
   document.getElementById('modal-subtitle').textContent = (cfg.bot_name || cfg.bot_username) ? 'Бот: ' + (cfg.bot_name || cfg.bot_username) : '';
   currentEnabled = !!cfg.is_enabled;
+  currentKbEnabled = !!(cfg.embedding_model);
   document.getElementById('field-model').value = cfg.model_name || '';
   document.getElementById('field-api-url').value = cfg.api_url || '';
   document.getElementById('field-api-key').value = cfg.api_key || '';
@@ -322,6 +340,7 @@ function openSettings(idx) {
   document.getElementById('field-top-k').value = cfg.retrieval_top_k ?? 3;
   document.getElementById('field-threshold').value = cfg.retrieval_threshold ?? 0.70;
   _updateToggle();
+  _updateKbToggle();
   document.getElementById('save-status').textContent = '';
   document.getElementById('settings-modal').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
@@ -348,14 +367,39 @@ function toggleEnabled() {
 function _updateToggle() {
   const btn = document.getElementById('toggle-btn');
   const knob = document.getElementById('toggle-knob');
+  const fields = document.getElementById('assistant-fields');
   if (currentEnabled) {
     btn.classList.remove('bg-gray-200');
     btn.classList.add('bg-indigo-600');
     knob.style.transform = 'translateX(20px)';
+    fields.classList.remove('hidden');
   } else {
     btn.classList.remove('bg-indigo-600');
     btn.classList.add('bg-gray-200');
     knob.style.transform = 'translateX(4px)';
+    fields.classList.add('hidden');
+  }
+}
+
+function toggleKb() {
+  currentKbEnabled = !currentKbEnabled;
+  _updateKbToggle();
+}
+
+function _updateKbToggle() {
+  const btn = document.getElementById('kb-toggle-btn');
+  const knob = document.getElementById('kb-toggle-knob');
+  const fields = document.getElementById('kb-fields');
+  if (currentKbEnabled) {
+    btn.classList.remove('bg-gray-200');
+    btn.classList.add('bg-indigo-600');
+    knob.style.transform = 'translateX(20px)';
+    fields.classList.remove('hidden');
+  } else {
+    btn.classList.remove('bg-indigo-600');
+    btn.classList.add('bg-gray-200');
+    knob.style.transform = 'translateX(4px)';
+    fields.classList.add('hidden');
   }
 }
 
@@ -372,11 +416,11 @@ async function saveSettings(e) {
     api_url: document.getElementById('field-api-url').value.trim(),
     api_key: document.getElementById('field-api-key').value,
     system_prompt: document.getElementById('field-prompt').value.trim(),
-    embedding_model: document.getElementById('field-emb-model').value.trim(),
-    embedding_api_url: document.getElementById('field-emb-url').value.trim(),
-    embedding_api_key: document.getElementById('field-emb-key').value,
-    retrieval_top_k: parseInt(document.getElementById('field-top-k').value) || 3,
-    retrieval_threshold: parseFloat(document.getElementById('field-threshold').value) || 0.70,
+    embedding_model: currentKbEnabled ? document.getElementById('field-emb-model').value.trim() : '',
+    embedding_api_url: currentKbEnabled ? document.getElementById('field-emb-url').value.trim() : '',
+    embedding_api_key: currentKbEnabled ? document.getElementById('field-emb-key').value : '',
+    retrieval_top_k: currentKbEnabled ? (parseInt(document.getElementById('field-top-k').value) || 3) : 3,
+    retrieval_threshold: currentKbEnabled ? (parseFloat(document.getElementById('field-threshold').value) || 0.70) : 0.70,
   };
 
   try {

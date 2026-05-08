@@ -689,6 +689,7 @@ async def _handle_dm_message(
         .where(
             ConversationMessage.bot_id == bot_id,
             ConversationMessage.max_user_id == max_user_id,
+            ConversationMessage.assistant_config_id == assistant_config.id,
         )
         .order_by(ConversationMessage.created_at)
     )

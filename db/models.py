@@ -599,6 +599,7 @@ class ConversationMessage(Base):
 
     __table_args__ = (
         Index("ix_conversation_lookup", "bot_id", "max_user_id", "created_at"),
+        Index("ix_conversation_config", "bot_id", "max_user_id", "assistant_config_id", "created_at"),
     )
 
 

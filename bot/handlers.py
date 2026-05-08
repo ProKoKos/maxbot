@@ -65,12 +65,15 @@ from bot.constants import (
     VERIFY_PAYLOAD_PREFIX,
 )
 from bot.crypto import decrypt_token
+from bot.embedding_client import get_embedding
 from db.models import (
     AssistantConfig,
     Bot,
     ChannelGroupPair,
     ConversationMessage,
     EventLog,
+    KnowledgeChunk,
+    KnowledgeDocument,
     LogLevel,
     PostLink,
     UserBotContext,
@@ -691,10 +694,41 @@ async def _handle_dm_message(
     )
     history = history_result.scalars().all()
 
+    # RAG: если настроен embedding — ищем релевантные чанки и добавляем в system_prompt.
+    system_prompt = assistant_config.system_prompt or ""
+    if text and assistant_config.embedding_model and assistant_config.embedding_api_key:
+        try:
+            emb_key = decrypt_token(assistant_config.embedding_api_key)
+            query_vec = await get_embedding(
+                text,
+                assistant_config.embedding_model,
+                assistant_config.embedding_api_url or "",
+                emb_key,
+            )
+            chunks_result = await session.execute(
+                select(KnowledgeChunk)
+                .join(KnowledgeDocument)
+                .where(
+                    KnowledgeDocument.assistant_config_id == assistant_config.id,
+                    KnowledgeDocument.status == "ready",
+                    (1 - KnowledgeChunk.embedding.cosine_distance(query_vec))
+                    >= assistant_config.retrieval_threshold,
+                )
+                .order_by(KnowledgeChunk.embedding.cosine_distance(query_vec))
+                .limit(assistant_config.retrieval_top_k)
+            )
+            kb_chunks = chunks_result.scalars().all()
+            if kb_chunks:
+                kb_context = "\n\n".join(c.content for c in kb_chunks)
+                system_prompt = system_prompt + "\n\n## База знаний\n" + kb_context
+                logger.debug("RAG: добавлено %s чанков для user %s", len(kb_chunks), max_user_id)
+        except Exception as exc:
+            logger.warning("RAG retrieval error for user %s: %s", max_user_id, exc)
+
     # Формат OpenAI Chat Completions: system → история → новый user-msg.
     messages: list[dict] = []
-    if assistant_config.system_prompt:
-        messages.append({"role": "system", "content": assistant_config.system_prompt})
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
     for msg in history:
         messages.append({"role": msg.role, "content": msg.content})
     if text:

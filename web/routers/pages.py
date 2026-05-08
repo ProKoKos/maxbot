@@ -445,6 +445,11 @@ async def assistant_page(request: Request, session: DBSession):
             "model_name": c.model_name,
             "api_url": c.api_url or "",
             "api_key": decrypt_token(c.api_key) if c.api_key else "",
+            "embedding_model": c.embedding_model or "",
+            "embedding_api_url": c.embedding_api_url or "",
+            "embedding_api_key": decrypt_token(c.embedding_api_key) if c.embedding_api_key else "",
+            "retrieval_top_k": c.retrieval_top_k,
+            "retrieval_threshold": c.retrieval_threshold,
         }
         for c in configs
     ]

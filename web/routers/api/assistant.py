@@ -28,6 +28,12 @@ class AssistantConfigUpdate(BaseModel):
     model_name: str | None = None
     api_url: str | None = None
     api_key: str | None = None
+    # Поля базы знаний (RAG)
+    embedding_model: str | None = None
+    embedding_api_url: str | None = None
+    embedding_api_key: str | None = None
+    retrieval_top_k: int | None = None
+    retrieval_threshold: float | None = None
 
 
 @router.get("/assistant/configs")
@@ -49,6 +55,11 @@ async def list_assistant_configs(current_user: CurrentUser, session: DBSession, 
             "model_name": c.model_name,
             "api_url": c.api_url,
             "api_key": decrypt_token(c.api_key) if c.api_key else "",
+            "embedding_model": c.embedding_model or "",
+            "embedding_api_url": c.embedding_api_url or "",
+            "embedding_api_key": decrypt_token(c.embedding_api_key) if c.embedding_api_key else "",
+            "retrieval_top_k": c.retrieval_top_k,
+            "retrieval_threshold": c.retrieval_threshold,
             "created_at": c.created_at.isoformat(),
         }
         for c in configs
@@ -124,6 +135,16 @@ async def update_assistant_config(
         config.api_url = body.api_url
     if body.api_key is not None:
         config.api_key = encrypt_token(body.api_key) if body.api_key else ""
+    if body.embedding_model is not None:
+        config.embedding_model = body.embedding_model or None
+    if body.embedding_api_url is not None:
+        config.embedding_api_url = body.embedding_api_url or None
+    if body.embedding_api_key is not None:
+        config.embedding_api_key = encrypt_token(body.embedding_api_key) if body.embedding_api_key else None
+    if body.retrieval_top_k is not None:
+        config.retrieval_top_k = body.retrieval_top_k
+    if body.retrieval_threshold is not None:
+        config.retrieval_threshold = body.retrieval_threshold
 
     await session.commit()
     return {"ok": True}

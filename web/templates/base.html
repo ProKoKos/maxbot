@@ -74,7 +74,7 @@
       </div>
 
       <!-- Чат-бот -->
-      {% set chatbot_pages = ['faq','leads','assistant','helpdesk'] %}
+      {% set chatbot_pages = ['kb','leads','assistant','helpdesk'] %}
       {% set chatbot_open = active_page in chatbot_pages %}
       <div>
         <button onclick="toggleSection('chatbot')"
@@ -87,7 +87,7 @@
           </svg>
         </button>
         <div id="section-chatbot" class="{% if not chatbot_open %}hidden{% endif %} mt-0.5 space-y-0.5 pl-3">
-          <a href="/faq"       class="block px-3 py-1.5 rounded-md text-xs transition-colors {% if active_page == 'faq'       %}bg-indigo-700 text-white{% else %}text-indigo-300 hover:bg-indigo-700 hover:text-white{% endif %}">FAQ</a>
+          <a href="/kb"        class="block px-3 py-1.5 rounded-md text-xs transition-colors {% if active_page == 'kb'        %}bg-indigo-700 text-white{% else %}text-indigo-300 hover:bg-indigo-700 hover:text-white{% endif %}">База знаний</a>
           <a href="/leads"     class="block px-3 py-1.5 rounded-md text-xs transition-colors {% if active_page == 'leads'     %}bg-indigo-700 text-white{% else %}text-indigo-300 hover:bg-indigo-700 hover:text-white{% endif %}">Лид-квалификация</a>
           <a href="/assistant" class="block px-3 py-1.5 rounded-md text-xs transition-colors {% if active_page == 'assistant' %}bg-indigo-700 text-white{% else %}text-indigo-300 hover:bg-indigo-700 hover:text-white{% endif %}">AI-ассистент</a>
           <a href="/helpdesk"  class="block px-3 py-1.5 rounded-md text-xs transition-colors {% if active_page == 'helpdesk'  %}bg-indigo-700 text-white{% else %}text-indigo-300 hover:bg-indigo-700 hover:text-white{% endif %}">Helpdesk</a>

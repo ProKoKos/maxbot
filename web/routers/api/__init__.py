@@ -23,6 +23,7 @@ from web.routers.api import (
     auth,
     bots,
     inbox,
+    kb,
     logs,
     pairs,
     posts,
@@ -37,6 +38,7 @@ router.include_router(pairs.router)
 router.include_router(verification.router)
 router.include_router(welcome.router)
 router.include_router(assistant.router)
+router.include_router(kb.router)
 router.include_router(posts.router)
 router.include_router(logs.router)
 router.include_router(inbox.router)

@@ -26,11 +26,13 @@ import enum
 from datetime import datetime
 from typing import Optional
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -500,6 +502,13 @@ class AssistantConfig(Base):
     model_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     api_url: Mapped[str] = mapped_column(String(512), nullable=False, default="https://openrouter.ai/api/v1")
     api_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    # ── База знаний (RAG) ──────────────────────────────────────────────────────
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    embedding_api_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Fernet-зашифрованный ключ embedding API (аналогично api_key)
+    embedding_api_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    retrieval_top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    retrieval_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.70)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -507,6 +516,9 @@ class AssistantConfig(Base):
     bot: Mapped["Bot"] = relationship()
     user_contexts: Mapped[list["UserBotContext"]] = relationship(
         back_populates="assistant_config", cascade="all, delete-orphan"
+    )
+    knowledge_documents: Mapped[list["KnowledgeDocument"]] = relationship(
+        back_populates="config", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -670,6 +682,66 @@ class UserChannelMembership(Base):
         Index("ix_user_channel_membership_lookup", "bot_id", "max_user_id"),
         # Будущий лукап: какие пользователи подписаны на конкретный канал.
         Index("ix_user_channel_membership_channel", "bot_id", "channel_id"),
+    )
+
+
+class KnowledgeDocument(Base):
+    """Документ базы знаний для AI-ассистента.
+
+    Каждый документ принадлежит конкретному AssistantConfig и проходит
+    жизненный цикл: pending → indexing → ready (или error).
+    После индексирования нарезается на KnowledgeChunk'и с векторами.
+    """
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    assistant_config_id: Mapped[int] = mapped_column(
+        ForeignKey("assistant_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    # "text" | "file" | "url"
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_hint: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # "pending" | "indexing" | "ready" | "error"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    config: Mapped["AssistantConfig"] = relationship(back_populates="knowledge_documents")
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_knowledge_document_config", "assistant_config_id"),
+        Index("ix_knowledge_document_status", "assistant_config_id", "status"),
+    )
+
+
+class KnowledgeChunk(Base):
+    """Фрагмент (чанк) документа базы знаний с векторным эмбеддингом.
+
+    Хранит текст + embedding размерностью 1536 (OpenAI text-embedding-3-small
+    и совместимые). Используется для cosine-similarity поиска при обработке
+    входящих DM: наиболее релевантные чанки инжектируются в system_prompt.
+    """
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1536), nullable=False)
+
+    document: Mapped["KnowledgeDocument"] = relationship(back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_knowledge_chunk_document", "document_id"),
     )
 
 

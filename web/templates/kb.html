@@ -144,7 +144,7 @@
 
 <!-- Превью чанков -->
 <div id="chunksModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeChunksModal()">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl h-[80vh] flex flex-col" onclick="event.stopPropagation()">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex flex-col" style="height: min(82vh, 720px);" onclick="event.stopPropagation()">
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
       <div>
@@ -157,14 +157,14 @@
         </svg>
       </button>
     </div>
-    <!-- Two-column body -->
-    <div class="flex flex-1 min-h-0">
-      <!-- Left: chunk list -->
-      <div class="w-48 shrink-0 border-r border-gray-100 overflow-y-auto" id="chunksList"></div>
-      <!-- Right: chunk content -->
-      <div class="flex-1 overflow-y-auto p-5">
+    <!-- Two-column body: overflow-hidden чтобы колонки не вылезали за пределы карточки -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Left: список чанков -->
+      <div class="w-52 shrink-0 border-r border-gray-100 overflow-y-scroll" id="chunksList"></div>
+      <!-- Right: содержимое чанка -->
+      <div class="flex-1 overflow-y-scroll p-5">
         <div id="chunkContent" class="text-sm text-gray-700 whitespace-pre-wrap font-mono leading-relaxed"></div>
-        <div id="chunkEmpty" class="text-sm text-gray-400 mt-4">Выберите чанк слева</div>
+        <div id="chunkEmpty" class="text-sm text-gray-400">Выберите чанк слева</div>
       </div>
     </div>
   </div>

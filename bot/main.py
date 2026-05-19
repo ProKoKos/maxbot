@@ -48,10 +48,16 @@ async def _ensure_schema() -> None:
 
 
 async def _register_webhooks() -> None:
-    """Регистрирует webhook-URL у всех активных ботов (только режим webhook)."""
+    """Регистрирует webhook-URL у всех активных ботов (только режим webhook).
+
+    Каждый бот получает свой уникальный URL вида:
+    ``{WEBHOOK_URL}/api/webhook/{bot_id}``
+    """
     if not settings.webhook_url:
         logger.error("BOT_MODE=webhook but WEBHOOK_URL is not set.")
         sys.exit(1)
+
+    base_url = settings.webhook_url.rstrip("/")
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Bot).where(Bot.is_active == True))  # noqa
@@ -64,12 +70,13 @@ async def _register_webhooks() -> None:
             logger.error("Bot %d: cannot decrypt token — %s", bot.id, exc)
             continue
 
+        bot_webhook_url = f"{base_url}/api/webhook/{bot.id}"
         async with MaxClient(token=token) as client:
             try:
                 resp = await client.subscribe_webhook(
-                    settings.webhook_url, secret=settings.webhook_secret
+                    bot_webhook_url, secret=settings.webhook_secret
                 )
-                logger.info("Bot %d (%s): webhook registered — %s", bot.id, bot.name, resp)
+                logger.info("Bot %d (%s): webhook registered at %s — %s", bot.id, bot.name, bot_webhook_url, resp)
             except MaxAPIError as exc:
                 logger.error("Bot %d (%s): webhook registration failed — %s", bot.id, bot.name, exc)
 
